@@ -452,34 +452,57 @@ uint8_t ploutf(uint8_t *cells, uint8_t IP)
 
 uint8_t ploutp(uint8_t *cells, uint8_t IP)
 {
+<<<<<<< HEAD
   uint8_t a = CGET(cells, (int32_t)IP + 1);
   uint8_t b = CGET(cells, (int32_t)IP - 1);
+=======
+  uint8_t a = CGET1(cells, (int32_t)IP + 1);
+  uint8_t b = CGET1(cells, (int32_t)IP - 1);
+>>>>>>> 9f7e74b3bfc228e4e18a9949821d9ddde750ab8e
   OCR0A = (uint8_t)(a + b);
   return (uint8_t)(IP + insdir);
 }
 
 uint8_t plenclose(uint8_t *cells, uint8_t IP)
 {
+<<<<<<< HEAD
   CSET(cells, IP, 255);
   CSET(cells, (int32_t)IP + 1, 255);
+=======
+  CSET1(cells, IP, 255);
+  CSET1(cells, (int32_t)IP + 1, 255);
+>>>>>>> 9f7e74b3bfc228e4e18a9949821d9ddde750ab8e
   return (uint8_t)(IP + 2);
 }
 
 uint8_t plinfect(uint8_t *cells, uint8_t IP)
 {
+<<<<<<< HEAD
   uint8_t cur = CGET(cells, IP);
   if (cur < 128)
   {
     CSET(cells, (int32_t)IP + 1, cur);
     CSET(cells, (int32_t)IP - 1, cur);
+=======
+  uint8_t cur = CGET1(cells, IP);
+  if (cur < 128)
+  {
+    CSET1(cells, (int32_t)IP + 1, cur);
+    CSET1(cells, (int32_t)IP - 1, cur);
+>>>>>>> 9f7e74b3bfc228e4e18a9949821d9ddde750ab8e
   }
   return (uint8_t)(IP + insdir);
 }
 
 uint8_t pldie(uint8_t *cells, uint8_t IP)
 {
+<<<<<<< HEAD
   CSET(cells, (int32_t)IP - 1, 0);
   CSET(cells, (int32_t)IP + 1, 0);
+=======
+  CSET1(cells, (int32_t)IP - 1, 0);
+  CSET1(cells, (int32_t)IP + 1, 0);
+>>>>>>> 9f7e74b3bfc228e4e18a9949821d9ddde750ab8e
   return (uint8_t)(IP + insdir);
 }
 
@@ -572,13 +595,21 @@ uint8_t bfbrac2(uint8_t *cells, uint8_t IP)
 
 uint8_t SIRoutf(uint8_t *cells, uint8_t IP)
 {
+<<<<<<< HEAD
   (*filtermod[qqq])((int)CGET(cells, (int32_t)IP + 1) + (int)CGET(cells, (int32_t)IP - 1));
+=======
+  (*filtermod[qqq])((int)CGET1(cells, (int32_t)IP + 1) + (int)CGET1(cells, (int32_t)IP - 1));
+>>>>>>> 9f7e74b3bfc228e4e18a9949821d9ddde750ab8e
   return (uint8_t)(IP + insdir);
 }
 
 uint8_t SIRoutp(uint8_t *cells, uint8_t IP)
 {
+<<<<<<< HEAD
   OCR0A = (uint8_t)(CGET(cells, (int32_t)IP + 1) + CGET(cells, (int32_t)IP - 1));
+=======
+  OCR0A = (uint8_t)(CGET1(cells, (int32_t)IP + 1) + CGET1(cells, (int32_t)IP - 1));
+>>>>>>> 9f7e74b3bfc228e4e18a9949821d9ddde750ab8e
   return (uint8_t)(IP + insdir);
 }
 
@@ -596,14 +627,22 @@ static inline uint8_t prng8(void)
 
 uint8_t SIRincif(uint8_t *cells, uint8_t IP)
 {
+<<<<<<< HEAD
   if ((CGET(cells, (int32_t)IP + 1) > 0 && CGET(cells, (int32_t)IP + 1) < 128))
+=======
+  if ((CGET1(cells, (int32_t)IP + 1) > 0 && CGET1(cells, (int32_t)IP + 1) < 128))
+>>>>>>> 9f7e74b3bfc228e4e18a9949821d9ddde750ab8e
     CSET(cells, IP, (uint8_t)(CGET(cells, IP) + 1));
   return (uint8_t)(IP + insdir);
 }
 
 uint8_t SIRdieif(uint8_t *cells, uint8_t IP)
 {
+<<<<<<< HEAD
   if ((CGET(cells, (int32_t)IP + 1) > 0 && CGET(cells, (int32_t)IP + 1) < 128))
+=======
+  if ((CGET1(cells, (int32_t)IP + 1) > 0 && CGET1(cells, (int32_t)IP + 1) < 128))
+>>>>>>> 9f7e74b3bfc228e4e18a9949821d9ddde750ab8e
   {
     if ((prng8() % 10) < 4)
       CSET(cells, IP, dead);
@@ -613,17 +652,28 @@ uint8_t SIRdieif(uint8_t *cells, uint8_t IP)
 
 uint8_t SIRrecif(uint8_t *cells, uint8_t IP)
 {
+<<<<<<< HEAD
   if (CGET(cells, (int32_t)IP + 1) >= 128)
+=======
+  if (CGET1(cells, (int32_t)IP + 1) >= 128)
+>>>>>>> 9f7e74b3bfc228e4e18a9949821d9ddde750ab8e
     CSET(cells, IP, recovered);
   return (uint8_t)(IP + insdir);
 }
 
 uint8_t SIRinfif(uint8_t *cells, uint8_t IP)
 {
+<<<<<<< HEAD
   if (CGET(cells, (int32_t)IP + 1) == 0)
   {
     if ((CGET(cells, (int32_t)IP - 1) > 0 && CGET(cells, (int32_t)IP - 1) < 128) ||
         (CGET(cells, (int32_t)IP + 1) > 0 && CGET(cells, (int32_t)IP + 1) < 128))
+=======
+  if (CGET1(cells, (int32_t)IP + 1) == 0)
+  {
+    if ((CGET1(cells, (int32_t)IP - 1) > 0 && CGET1(cells, (int32_t)IP - 1) < 128) ||
+        (CGET1(cells, (int32_t)IP + 1) > 0 && CGET1(cells, (int32_t)IP + 1) < 128))
+>>>>>>> 9f7e74b3bfc228e4e18a9949821d9ddde750ab8e
     {
       if ((prng8() % 10) < 4)
         CSET(cells, IP, 1);
@@ -867,13 +917,21 @@ uint8_t btclear(uint8_t *cells, uint8_t IP)
       btdir = 2;
   }
   else
+<<<<<<< HEAD
     CSET(cells, omem, 0);
+=======
+    CSET1(cells, omem, 0);
+>>>>>>> 9f7e74b3bfc228e4e18a9949821d9ddde750ab8e
   return IP;
 }
 
 uint8_t btdup(uint8_t *cells, uint8_t IP)
 {
+<<<<<<< HEAD
   if (cells[omem] == 0 || CGET(cells, (int32_t)omem - 1) != 0)
+=======
+  if (cells[omem] == 0 || CGET1(cells, (int32_t)omem - 1) != 0)
+>>>>>>> 9f7e74b3bfc228e4e18a9949821d9ddde750ab8e
   {
     if (btdir == 0)
       btdir = 1;
@@ -885,7 +943,11 @@ uint8_t btdup(uint8_t *cells, uint8_t IP)
       btdir = 2;
   }
   else
+<<<<<<< HEAD
     CSET(cells, (int32_t)omem - 1, cells[omem]);
+=======
+    CSET1(cells, (int32_t)omem - 1, cells[omem]);
+>>>>>>> 9f7e74b3bfc228e4e18a9949821d9ddde750ab8e
   return IP;
 }
 
@@ -970,10 +1032,17 @@ uint8_t redrooms(uint8_t *cells, uint8_t IP)
 
 uint8_t redunmask(uint8_t *cells, uint8_t IP)
 {
+<<<<<<< HEAD
   uint8_t vL = CGET(cells, (int32_t)IP - 1) ^ 255;
   uint8_t vR = CGET(cells, (int32_t)IP + 1) ^ 255;
   CSET(cells, (int32_t)IP - 1, vL);
   CSET(cells, (int32_t)IP + 1, vR);
+=======
+  uint8_t vL = CGET1(cells, (int32_t)IP - 1) ^ 255;
+  uint8_t vR = CGET1(cells, (int32_t)IP + 1) ^ 255;
+  CSET1(cells, (int32_t)IP - 1, vL);
+  CSET1(cells, (int32_t)IP + 1, vR);
+>>>>>>> 9f7e74b3bfc228e4e18a9949821d9ddde750ab8e
   return (uint8_t)(IP + insdir);
 }
 
@@ -995,7 +1064,11 @@ uint8_t redprospero(uint8_t *cells, uint8_t IP)
 
 uint8_t redoutside(uint8_t *cells, uint8_t IP)
 {
+<<<<<<< HEAD
   CSET(cells, (int32_t)omem + 1, adcread(3)); // get output signal
+=======
+  CSET1(cells, (int32_t)omem + 1, adcread(3)); // get output signal
+>>>>>>> 9f7e74b3bfc228e4e18a9949821d9ddde750ab8e
   (*filtermod[qqq])((int)cells[omem]);
   return (uint8_t)(IP + insdir);
 }
@@ -1589,4 +1662,9 @@ int main(void)
     }
   }
   return 0;
+<<<<<<< HEAD
 }
+=======
+}
+}
+>>>>>>> 9f7e74b3bfc228e4e18a9949821d9ddde750ab8e
