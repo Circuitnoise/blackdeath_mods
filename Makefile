@@ -1,23 +1,24 @@
-MCU=atmega128
+# makefile, written by guido socher
+MCU=atmega168
+#MCU=at90s4433
 CC=avr-gcc
-CEXTRA=-Wa,-adhlns=$(<:.c=.lst)
+#CEXTRA=-Wa,-adhlns=$(<:.c=.lst)
 #EXTERNAL_RAM = -Wl,--defsym=__heap_start=0x801100,--defsym=__heap_end=0x80ffff
 #EXTERNAL_RAM = -Wl,-Tdata=0x801100,--defsym=__heap_end=0x80ffff
-LDFLAGS  = -mmcu=${MCU} ${EXTERNAL_RAM} -Wl,-u,vfprintf -lprintf_flt -lm
+LDFLAGS  = -mmcu=${MCU} -Wl,-u, -lm
+#LDFLAGS  = -mmcu=${MCU} -Wl,-u,vfprintf -lprintf_flt -lm
 OBJCOPY=avr-objcopy
 # optimize for size:
-CFLAGS=-g -mmcu=$(MCU) -Wall -Wstrict-prototypes -O3 -mcall-prologues ${CEXTRA}
-TARGET=blackdeath
-
-DEVICE = m128
+#CFLAGS=-g -mmcu=$(MCU) -Wall -Wstrict-prototypes -mcall-prologues ${CEXTRA}
+CFLAGS=-g -mmcu=$(MCU) -Os
+DEVICE = m168
 AVRDUDE = avrdude -c usbasp -p $(DEVICE)
-FUSEH = 0x99
-FUSEE = 0xff
-FUSEL = 0xff
+FUSEH = 0xdf
+FUSEL = 0xf7
 
 
 #-------------------
-all: blackdeath.hex
+all: microbdinterp.hex
 #-------------------
 help: 
 	@echo "Usage: make all|load|load_pre|rdfuses|wrfuse1mhz|wrfuse4mhz|wrfusecrystal"
@@ -25,31 +26,33 @@ help:
 	@echo "         external crystal! uC is dead after wrfusecrystal if you do not"
 	@echo "         have an external crystal."
 #-------------------
-blackdeath.hex : blackdeath.out 
-	$(OBJCOPY) -R .eeprom -O ihex blackdeath.out blackdeath.hex 
-#blackdeath.out : blackdeath.o 
-#	$(CC) $(CFLAGS) -o blackdeath.out -Wl,-Map,blackdeath.map blackdeath.o 
-blackdeath.out : blackdeath.o 
-	$(CC) ${LDFLAGS} $(CFLAGS) -o blackdeath.out  blackdeath.o -lm
+microbdinterp.hex : microbdinterp.out 
+	$(OBJCOPY) -R .eeprom -O ihex microbdinterp.out microbdinterp.hex 
+#microbdinterp.out : microbdinterp.o 
+#	$(CC) $(CFLAGS) -o microbdinterp.out -Wl,-Map,microbdinterp.map microbdinterp.o 
+microbdinterp.out : microbdinterp.o 
+	$(CC) ${LDFLAGS} $(CFLAGS) -o microbdinterp.out  microbdinterp.o 
 
 
-blackdeath.o : blackdeath.c 
-	$(CC) $(CFLAGS) -Os -c blackdeath.c
+microbdinterp.o : microbdinterp.c 
+	$(CC) $(CFLAGS) -Os -c microbdinterp.c
 
-blackdeath.elf: blackdeath.o
-	$(CC) ${LDFLAGS} $(CFLAGS) -o blackdeath.elf blackdeath.o -lm
+microbdinterp.elf: microbdinterp.o
+	$(CC) ${LDFLAGS} $(CFLAGS) -o microbdinterp.elf microbdinterp.o
 
-disasm:	blackdeath.elf
+disasm:	microbdinterp.elf
 	avr-objdump -d noise.elf
 
 fuse:
-	$(AVRDUDE) -U hfuse:w:$(FUSEH):m -U lfuse:w:$(FUSEL):m -U efuse:w:$(FUSEE):m
+	$(AVRDUDE) -F -U hfuse:w:$(FUSEH):m -U lfuse:w:$(FUSEL):m
 
 flash: all
-	$(AVRDUDE) -U flash:w:blackdeath.hex:i
+	$(AVRDUDE) -F -U flash:w:microbdinterp.hex:i
+
 
 
 #-------------------
 clean:
 	rm -f *.o *.map *.out *t.hex
 #-------------------
+ 
