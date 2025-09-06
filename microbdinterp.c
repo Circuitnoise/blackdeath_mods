@@ -126,8 +126,7 @@ static inline uint16_t wrap_u16(int32_t x, uint16_t mod)
 static inline uint8_t CGET(const uint8_t *c, int32_t i) { return c[SAFE_IDX(i)]; }
 static inline void CSET(uint8_t *c, int32_t i, uint8_t v) { c[SAFE_IDX(i)] = v; }
 
-static inline uint8_t CGET1(const uint8_t *c, int32_t i) { return c[SAFE_IDX(i)]; }
-static inline void CSET1(uint8_t *c, int32_t i, uint8_t v) { c[SAFE_IDX(i)] = v; }
+static inline uint8_t clamp_filterk(uint8_t k) { return (k > 8) ? 8 : k; }
 
 /* --- Schnelle 8-Bit-Wrap-Helper für IP-Nachbarn ------------------------- */
 static inline uint8_t add_u8(uint8_t base, int16_t delta) { return (uint8_t)(base + delta); }
@@ -453,34 +452,34 @@ uint8_t ploutf(uint8_t *cells, uint8_t IP)
 
 uint8_t ploutp(uint8_t *cells, uint8_t IP)
 {
-  uint8_t a = CGET1(cells, (int32_t)IP + 1);
-  uint8_t b = CGET1(cells, (int32_t)IP - 1);
+  uint8_t a = CGET(cells, (int32_t)IP + 1);
+  uint8_t b = CGET(cells, (int32_t)IP - 1);
   OCR0A = (uint8_t)(a + b);
   return (uint8_t)(IP + insdir);
 }
 
 uint8_t plenclose(uint8_t *cells, uint8_t IP)
 {
-  CSET1(cells, IP, 255);
-  CSET1(cells, (int32_t)IP + 1, 255);
+  CSET(cells, IP, 255);
+  CSET(cells, (int32_t)IP + 1, 255);
   return (uint8_t)(IP + 2);
 }
 
 uint8_t plinfect(uint8_t *cells, uint8_t IP)
 {
-  uint8_t cur = CGET1(cells, IP);
+  uint8_t cur = CGET(cells, IP);
   if (cur < 128)
   {
-    CSET1(cells, (int32_t)IP + 1, cur);
-    CSET1(cells, (int32_t)IP - 1, cur);
+    CSET(cells, (int32_t)IP + 1, cur);
+    CSET(cells, (int32_t)IP - 1, cur);
   }
   return (uint8_t)(IP + insdir);
 }
 
 uint8_t pldie(uint8_t *cells, uint8_t IP)
 {
-  CSET1(cells, (int32_t)IP - 1, 0);
-  CSET1(cells, (int32_t)IP + 1, 0);
+  CSET(cells, (int32_t)IP - 1, 0);
+  CSET(cells, (int32_t)IP + 1, 0);
   return (uint8_t)(IP + insdir);
 }
 
@@ -573,13 +572,13 @@ uint8_t bfbrac2(uint8_t *cells, uint8_t IP)
 
 uint8_t SIRoutf(uint8_t *cells, uint8_t IP)
 {
-  (*filtermod[qqq])((int)CGET1(cells, (int32_t)IP + 1) + (int)CGET1(cells, (int32_t)IP - 1));
+  (*filtermod[qqq])((int)CGET(cells, (int32_t)IP + 1) + (int)CGET(cells, (int32_t)IP - 1));
   return (uint8_t)(IP + insdir);
 }
 
 uint8_t SIRoutp(uint8_t *cells, uint8_t IP)
 {
-  OCR0A = (uint8_t)(CGET1(cells, (int32_t)IP + 1) + CGET1(cells, (int32_t)IP - 1));
+  OCR0A = (uint8_t)(CGET(cells, (int32_t)IP + 1) + CGET(cells, (int32_t)IP - 1));
   return (uint8_t)(IP + insdir);
 }
 
@@ -597,14 +596,14 @@ static inline uint8_t prng8(void)
 
 uint8_t SIRincif(uint8_t *cells, uint8_t IP)
 {
-  if ((CGET1(cells, (int32_t)IP + 1) > 0 && CGET1(cells, (int32_t)IP + 1) < 128))
+  if ((CGET(cells, (int32_t)IP + 1) > 0 && CGET(cells, (int32_t)IP + 1) < 128))
     CSET(cells, IP, (uint8_t)(CGET(cells, IP) + 1));
   return (uint8_t)(IP + insdir);
 }
 
 uint8_t SIRdieif(uint8_t *cells, uint8_t IP)
 {
-  if ((CGET1(cells, (int32_t)IP + 1) > 0 && CGET1(cells, (int32_t)IP + 1) < 128))
+  if ((CGET(cells, (int32_t)IP + 1) > 0 && CGET(cells, (int32_t)IP + 1) < 128))
   {
     if ((prng8() % 10) < 4)
       CSET(cells, IP, dead);
@@ -614,17 +613,17 @@ uint8_t SIRdieif(uint8_t *cells, uint8_t IP)
 
 uint8_t SIRrecif(uint8_t *cells, uint8_t IP)
 {
-  if (CGET1(cells, (int32_t)IP + 1) >= 128)
+  if (CGET(cells, (int32_t)IP + 1) >= 128)
     CSET(cells, IP, recovered);
   return (uint8_t)(IP + insdir);
 }
 
 uint8_t SIRinfif(uint8_t *cells, uint8_t IP)
 {
-  if (CGET1(cells, (int32_t)IP + 1) == 0)
+  if (CGET(cells, (int32_t)IP + 1) == 0)
   {
-    if ((CGET1(cells, (int32_t)IP - 1) > 0 && CGET1(cells, (int32_t)IP - 1) < 128) ||
-        (CGET1(cells, (int32_t)IP + 1) > 0 && CGET1(cells, (int32_t)IP + 1) < 128))
+    if ((CGET(cells, (int32_t)IP - 1) > 0 && CGET(cells, (int32_t)IP - 1) < 128) ||
+        (CGET(cells, (int32_t)IP + 1) > 0 && CGET(cells, (int32_t)IP + 1) < 128))
     {
       if ((prng8() % 10) < 4)
         CSET(cells, IP, 1);
@@ -868,13 +867,13 @@ uint8_t btclear(uint8_t *cells, uint8_t IP)
       btdir = 2;
   }
   else
-    CSET1(cells, omem, 0);
+    CSET(cells, omem, 0);
   return IP;
 }
 
 uint8_t btdup(uint8_t *cells, uint8_t IP)
 {
-  if (cells[omem] == 0 || CGET1(cells, (int32_t)omem - 1) != 0)
+  if (cells[omem] == 0 || CGET(cells, (int32_t)omem - 1) != 0)
   {
     if (btdir == 0)
       btdir = 1;
@@ -886,7 +885,7 @@ uint8_t btdup(uint8_t *cells, uint8_t IP)
       btdir = 2;
   }
   else
-    CSET1(cells, (int32_t)omem - 1, cells[omem]);
+    CSET(cells, (int32_t)omem - 1, cells[omem]);
   return IP;
 }
 
@@ -971,10 +970,10 @@ uint8_t redrooms(uint8_t *cells, uint8_t IP)
 
 uint8_t redunmask(uint8_t *cells, uint8_t IP)
 {
-  uint8_t vL = CGET1(cells, (int32_t)IP - 1) ^ 255;
-  uint8_t vR = CGET1(cells, (int32_t)IP + 1) ^ 255;
-  CSET1(cells, (int32_t)IP - 1, vL);
-  CSET1(cells, (int32_t)IP + 1, vR);
+  uint8_t vL = CGET(cells, (int32_t)IP - 1) ^ 255;
+  uint8_t vR = CGET(cells, (int32_t)IP + 1) ^ 255;
+  CSET(cells, (int32_t)IP - 1, vL);
+  CSET(cells, (int32_t)IP + 1, vR);
   return (uint8_t)(IP + insdir);
 }
 
@@ -996,7 +995,7 @@ uint8_t redprospero(uint8_t *cells, uint8_t IP)
 
 uint8_t redoutside(uint8_t *cells, uint8_t IP)
 {
-  CSET1(cells, (int32_t)omem + 1, adcread(3)); // get output signal
+  CSET(cells, (int32_t)omem + 1, adcread(3)); // get output signal
   (*filtermod[qqq])((int)cells[omem]);
   return (uint8_t)(IP + insdir);
 }
@@ -1590,5 +1589,4 @@ int main(void)
     }
   }
   return 0;
-}
 }
