@@ -77,7 +77,7 @@ Modified and documented by circuitnoise
 
 /* --- Constants/Macros -------------------------------------------------- */
 
-#define MAX_SAM 255 // maximale Anzahl Samples (historisch)
+#define MAX_SAM 255 // Maximum number of samples (historical)
 #define BV(bit) (1 << (bit))
 #define cbi(reg, bit) reg &= ~(BV(bit))
 #define sbi(reg, bit) reg |= (BV(bit))
@@ -94,8 +94,8 @@ Modified and documented by circuitnoise
 #define susceptible 0
 #define tau 2
 
-/* --- Globale Variablen -------------------------------------------------- */
-int8_t insdir = 1, dir = 1; /* signiert! */
+/* --- Global Variables -------------------------------------------------- */
+int8_t insdir = 1, dir = 1; /* signed! */
 uint8_t filterk = 0, cpu = 0, plague = 0, step = 0;
 uint8_t hardk = 0, fhk = 0, instruction = 0;
 uint8_t instructionp = 0, IP = 0, controls = 0;
@@ -107,16 +107,15 @@ static bool insdir_modified = false;
 int8_t cycle = -1; // signiert!
 uint8_t ostack[20];
 
-/* vollständiger Zellspeicher: 256 */
+/* Complete cell memory: 256 */
 static uint8_t cells_buf[CELLS_LEN];
 
 uint8_t stack[20];
-static uint8_t omem; /* bleibt 8-Bit: Mod 256 gratis */
+static uint8_t omem; /* remains 8-bit: Mod 256 free */
 
-static inline uint8_t clamp_filterk(uint8_t k) { return (k > 8) ? 8 : k; }
-static uint8_t last_cpu = 0xFF; // unmöglicher Startwert => erster Durchlauf triggert optional
+static uint8_t last_cpu = 0xFF; // impossible start value => first run triggers optional
 
-/* --- Safe-Index + Wrap -------------------------------------------------- */
+/* --- Safe-Index + Wrap Helper Functions --------------------------------- */
 static inline uint16_t wrap_u16(int32_t x, uint16_t mod)
 {
   int32_t r = x % mod;
@@ -135,7 +134,7 @@ static inline uint8_t add_u8(uint8_t base, int16_t delta) { return (uint8_t)(bas
 #define IP_LEFT(ip) (add_u8((ip), -1))
 #define IP_RIGHT(ip) (add_u8((ip), +1))
 
-/* --- 2D-Helfer für 16x16 ------------------------------------------------ */
+/* --- 2D Helper Functions for 16x16 grid -------------------------------- */
 static inline uint8_t idx2d(int x, int y)
 {
   x = (x % GRID_W + GRID_W) % GRID_W;
@@ -150,7 +149,7 @@ static inline uint8_t omem_move(uint8_t om, int dx, int dy)
   return (uint8_t)(y * GRID_W + x);
 }
 
-/* --- omem-Inkrement/ Dekrement (Mod 256 gratis) ------------------------- */
+/* --- omem increment/decrement (Mod 256 free) --------------------------- */
 static inline void omem_inc(void) { omem = (uint8_t)(omem + 1); }
 static inline void omem_dec(void) { omem = (uint8_t)(omem - 1); }
 
@@ -223,12 +222,13 @@ uint8_t adcread(uint8_t channel)
   // ADIF nach Abschluss löschen (optional, aber sauber)
   ADCSRA |= (1 << ADIF);
 
-  return ADCH; // linksjustiert → oberes Byte
+  // left-justified -> upper byte
+  return ADCH;
 }
 
 /*
-Create array of values from output signal(adcread(3)) as sample storage
-→ Jetzt: komplette 256 Zellen initialisieren
+Create array of values from output signal (adcread(3)) as sample storage
+→ Now: initialize all 256 cells
 */
 void initcell(uint8_t *cells)
 {
@@ -239,7 +239,7 @@ void initcell(uint8_t *cells)
 }
 
 /* ---------------------------------------------------------------------- */
-/* Filter-Funktionen                                                      */
+/* Filter Functions                                                      */
 /* ---------------------------------------------------------------------- */
 
 void leftsh(unsigned int cel)
@@ -263,7 +263,7 @@ void divvv(unsigned int cel)
   OCR1A = cel / (k + 1);
 }
 
-/* Pointer auf Filter-Funktionen */
+/* Pointer to filter functions */
 void (*filtermod[])(unsigned int cel) = {leftsh, rightsh, mult, divvv};
 
 /* ---------------------------------------------------------------------- */
@@ -1056,10 +1056,10 @@ void hodge(uint8_t *cellies)
     k2 = 1;
   g = cells[3];
 
-  // Nachbarn (CoreCellx in sicherer Range 17..110)
+  // Neighbors (CoreCellx in safe range 17..110)
   sum = cells[CoreCellx] + cells[CoreCellx - 1] + cells[CoreCellx + 1] + cells[CoreCellx - CELLLEN] + cells[CoreCellx + CELLLEN] + cells[CoreCellx - CELLLEN - 1] + cells[CoreCellx - CELLLEN + 1] + cells[CoreCellx + CELLLEN - 1] + cells[CoreCellx + CELLLEN + 1];
 
-  // Zählungen
+  // Counters
   numill = 0;
   numinf = 0;
   {
@@ -1119,7 +1119,7 @@ void hodge(uint8_t *cellies)
       numinf++;
   }
 
-  // Ganzzahlig (entspricht floor bei >=0)
+  // Integer arithmetic (equivalent to floor for >=0)
   if (cells[CoreCellx] == 0)
     newcells[CoreCellx] = (uint8_t)((numinf / k1) + (numill / k2));
   else if (cells[CoreCellx] < (uint8_t)(q - 1))
@@ -1289,10 +1289,9 @@ typedef struct
 static AdcSnapshot g_adc;       // Current values
 static uint16_t g_adc_tick = 0; // Clock for throttling
 
-// Update all pots every 16 iterations
+// Update all potentiometers every 16 iterations
 static inline void adc_poll_throttled(void)
 {
-  // alle 16 Iterationen alle Potis aktualisieren
   if ((g_adc_tick++ & 0x0F) == 0)
   {
     g_adc.ch0 = adcread(0);
@@ -1350,7 +1349,7 @@ int main(void)
   TCCR1A = (1 << COM1A0);              // Toggle OCR1A/OCR1B on Compare Match
   TCCR1B = (1 << WGM12) | (1 << CS11); // CTC, /8
 
-  // Audio Output (beibehalten; Hardware prüfen, ob COM0A0 korrekt ist)
+  // Audio Output (maintain; check hardware if COM0A0 is correct)
   TCCR0A = (1 << COM0A0) | (1 << WGM01) | (1 << WGM00); // Toggle OC0A on Compare Match // Fast PWM
   TCCR0B |= (1 << CS00) | (1 << CS02) | (1 << WGM02);   // prescaler /1024 // WGM02=1 >> Fast PWM
 
@@ -1591,4 +1590,5 @@ int main(void)
     }
   }
   return 0;
+}
 }
