@@ -1,3 +1,10 @@
 {
+    "C_Cpp.default.includePath": [
+        "/opt/homebrew/Cellar/avr-gcc@9/9.4.0_1/lib/avr-gcc/9/gcc/avr/9.4.0/include",
+        "/opt/homebrew/Cellar/avr-gcc@9/9.4.0_1/lib/avr-gcc/9/gcc/avr/9.4.0/include-fixed",
+        "/opt/homebrew/include/avr"
+    ],
+    "C_Cpp.default.compilerPath": "/opt/homebrew/bin/avr-gcc",
+    "C_Cpp.default.intelliSenseMode": "gcc-x64",
     "makefile.makefilePath": "Makefile.micro"
 }

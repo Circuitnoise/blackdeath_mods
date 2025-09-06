@@ -11,6 +11,7 @@ OBJCOPY=avr-objcopy
 # optimize for size:
 #CFLAGS=-g -mmcu=$(MCU) -Wall -Wstrict-prototypes -mcall-prologues ${CEXTRA}
 CFLAGS=-g -mmcu=$(MCU) -Os
+# AVR Header-Pfade angepasst
 DEVICE = m168
 AVRDUDE = avrdude -c usbasp -p $(DEVICE)
 FUSEH = 0xdf
