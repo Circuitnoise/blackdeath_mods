@@ -1,32 +1,51 @@
 /*
+THE PLAGUE INTERPRETER
+A cellular automata based sound synthesizer
 
-- THE PLAGUE INTERPRETER
+This program implements various cellular automata algorithms to create experimental
+sound synthesis. It uses an ATMega128 microcontroller with the following features:
 
-... to bring back to all of us a natural, occult equivalent of the
-dogma we no longer believe. [Antonin Artaud]
+Hardware Setup:
+- 3 Potentiometers for control:
+  * Left: CPU step & instruction set selection
+  * Middle: Hardware routing & filter configuration
+  * Right: Plague step & process selection, filter modulation
+- Audio output via PWM (Pin D6)
+- Filter clock output (Pin B1)
+- Routing switches for audio path configuration
 
-Returning the body, electronics, and dystopic code to the earth,
-revived and decoded years later as "yersinia pestis".
+Core Concepts:
+1. Cell Space:
+   - 256 byte array representing the cellular automata grid
+   - Can be divided into two 128-byte spaces for double-buffering
 
-- knobs:
+2. Instruction Sets:
+   - First: Basic operations (26 instructions)
+   - Plague: Infection spreading algorithms (8 instructions)
+   - Brainfuck: Minimalist instruction set (9 instructions)
+   - SIR: Susceptible-Infected-Recovered model (6 instructions)
+   - Redcode: Core War instruction set (11 instructions)
+   - Biota: 2D grid movement operations (10 instructions)
+   - Red Death: Special plague spreading algorithms (7 instructions)
 
-left: cpu step, select instruction set (>>x)
-mid: hardware and filter
-right: controls - plague step and plague process select, filter modifier!
+3. Plague Functions:
+   Different cellular automata algorithms that modify the cell space:
+   - Mutate: Random mutations based on ADC input
+   - SIR: Epidemic spreading model
+   - Hodge: Complex neighbor-based evolution
+   - Cel: Rule-based cell state changes
+   - Life: Conway's Game of Life variant
 
-Based on the programming of microresearch - http://1010.co.uk/
+4. Hardware Control:
+   - Filter frequency modulation via PWM
+   - Audio signal routing through different paths
+   - Feedback loop configuration
+   - Multiple clock divider settings
 
-Modified by circuitnoise
-
-~ more documentation
-~ code refactoring
-~ merge changes of orig. code from Jan 23, 2013
-
-TODO:
-
-** crashing still!!!!
-
+Based on original work by microresearch (http://1010.co.uk/)
+Modified and documented by circuitnoise
 */
+
 #define DEBUG 0
 #define F_CPU 16000000UL
 
@@ -34,7 +53,7 @@ TODO:
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <math.h>
+// #include <math.h>            // entfällt (kein floor() mehr)
 #include <stdbool.h>
 #include <avr/io.h>
 #include <avr/eeprom.h>
@@ -43,13 +62,25 @@ TODO:
 #include <util/delay.h>
 #include <avr/sleep.h>
 #include <avr/wdt.h>
+#include <util/atomic.h>
 
-#define CELLLEN 16
+/* --- Consistent 16x16 Layout ----------------------------------------- */
+#define GRID_W 16
+#define GRID_H 16
+#define CELLLEN GRID_W
+#define CELLS_LEN (GRID_W * GRID_H) /* 256: free 8-bit wraps */
 
-#define MAX_SAM 255                     // Maximum quantity of samples // Define that cells[] is 255 max
-#define BV(bit) (1 << (bit))            // Byte Value => converts bit into a byte value. One at bit location.
-#define cbi(reg, bit) reg &= ~(BV(bit)) // Clears the corresponding bit in register reg
-#define sbi(reg, bit) reg |= (BV(bit))  // Sets the corresponding bit in register reg
+/* Compile-time Guard (if preprocessor available) */
+#if (GRID_W != 16) || (GRID_H != 16) || (CELLLEN != 16) || (CELLS_LEN != 256)
+#error "GRID/CELLLEN/CELLS_LEN must be 16/16/16/256 for 8-bit wrapping semantics."
+#endif
+
+/* --- Constants/Macros -------------------------------------------------- */
+
+#define MAX_SAM 255 // Maximum number of samples (historical)
+#define BV(bit) (1 << (bit))
+#define cbi(reg, bit) reg &= ~(BV(bit))
+#define sbi(reg, bit) reg |= (BV(bit))
 #define HEX__(n) 0x##n##UL
 #define B8__(x) ((x & 0x0000000FLU) ? 1 : 0) + ((x & 0x000000F0LU) ? 2 : 0) + ((x & 0x00000F00LU) ? 4 : 0) + ((x & 0x0000F000LU) ? 8 : 0) + ((x & 0x000F0000LU) ? 16 : 0) + ((x & 0x00F00000LU) ? 32 : 0) + ((x & 0x0F000000LU) ? 64 : 0) + ((x & 0xF0000000LU) ? 128 : 0)
 #define B8(d) ((unsigned char)B8__(HEX__(d)))
@@ -63,59 +94,83 @@ TODO:
 #define susceptible 0
 #define tau 2
 
-// Initialisierung der globalen Variablen
-signed char insdir = 1, dir = 1;
-unsigned char filterk = 0, cpu = 0, plague = 0, step = 0;
-unsigned char hardk = 0, fhk = 0, instruction = 0;
-unsigned char instructionp = 0, IP = 0, controls = 0;
-unsigned char hardware = 0, samp = 0, count = 0, qqq = 0;
-unsigned char btdir = 0, dcdir = 0;
-unsigned char clock = 0;
+/* --- Global Variables -------------------------------------------------- */
+int8_t insdir = 1, dir = 1; /* signed! */
+uint8_t filterk = 0, cpu = 0, plague = 0, step = 0;
+uint8_t hardk = 0, fhk = 0, instruction = 0;
+uint8_t instructionp = 0, IP = 0, controls = 0;
+uint8_t hardware = 0, samp = 0, count = 0, qqq = 0;
+uint8_t btdir = 0, dcdir = 0;
+uint8_t clock = 0;
 static bool insdir_modified = false;
 
 int8_t cycle = -1; // signiert!
 uint8_t ostack[20];
 
-static unsigned char xxx[MAX_SAM + 12];
+/* Complete cell memory: 256 */
+static uint8_t cells_buf[CELLS_LEN];
 
-unsigned char stack[20], omem;
+uint8_t stack[20];
+static uint8_t omem; /* remains 8-bit: Mod 256 free */
 
-static inline uint8_t clamp_filterk(uint8_t k) { return (k > 8) ? 8 : k; }
+static uint8_t last_cpu = 0xFF; // impossible start value => first run triggers optional
 
-static uint8_t last_cpu = 0xFF; // unmöglicher Startwert => erster Durchlauf triggert optional
-
-// Obergrenze dem realen Array anpassen:
-#define CELLS_LEN (MAX_SAM + 12) // 267
-
+/* --- Safe-Index + Wrap Helper Functions --------------------------------- */
 static inline uint16_t wrap_u16(int32_t x, uint16_t mod)
 {
   int32_t r = x % mod;
   return (uint16_t)(r < 0 ? r + mod : r);
 }
+#define SAFE_IDX(i) (wrap_u16((int32_t)(i), CELLS_LEN))
 
-static inline uint8_t CGET(unsigned char *cells, int32_t i)
+static inline uint8_t CGET(const uint8_t *c, int32_t i) { return c[SAFE_IDX(i)]; }
+static inline void CSET(uint8_t *c, int32_t i, uint8_t v) { c[SAFE_IDX(i)] = v; }
+
+static inline uint8_t CGET1(const uint8_t *c, int32_t i) { return c[SAFE_IDX(i)]; }
+static inline void CSET1(uint8_t *c, int32_t i, uint8_t v) { c[SAFE_IDX(i)] = v; }
+
+/* --- Schnelle 8-Bit-Wrap-Helper für IP-Nachbarn ------------------------- */
+static inline uint8_t add_u8(uint8_t base, int16_t delta) { return (uint8_t)(base + delta); }
+#define IP_LEFT(ip) (add_u8((ip), -1))
+#define IP_RIGHT(ip) (add_u8((ip), +1))
+
+/* --- 2D Helper Functions for 16x16 grid -------------------------------- */
+static inline uint8_t idx2d(int x, int y)
 {
-  return cells[wrap_u16(i, CELLS_LEN)];
+  x = (x % GRID_W + GRID_W) % GRID_W;
+  y = (y % GRID_H + GRID_H) % GRID_H;
+  return (uint8_t)(y * GRID_W + x);
 }
-static inline void CSET(unsigned char *cells, int32_t i, uint8_t v)
+static inline uint8_t omem_move(uint8_t om, int dx, int dy)
 {
-  cells[wrap_u16(i, CELLS_LEN)] = v;
+  int x = om % GRID_W, y = om / GRID_W;
+  x = (x + dx + GRID_W) % GRID_W;
+  y = (y + dy + GRID_H) % GRID_H;
+  return (uint8_t)(y * GRID_W + x);
 }
+
+/* --- omem increment/decrement (Mod 256 free) --------------------------- */
+static inline void omem_inc(void) { omem = (uint8_t)(omem + 1); }
+static inline void omem_dec(void) { omem = (uint8_t)(omem - 1); }
+
+/* ---------------------------------------------------------------------- */
+/* ADC                                                                    */
+/* ---------------------------------------------------------------------- */
 
 /*
 Initialize Analog Digital Converter (ADC)
-Reference Voltage to AVCC
-Single Conversion Mode
-Left Adjusted Results
-Activate ADC
+- Sets reference voltage to AVCC
+- Configures for 8-bit left-adjusted results
+- Enables ADC with 128 prescaler
+- Sets up Port C for analog inputs
 */
 void adc_init(void)
 {
-  // Referenzspannung: AVCC
+  // Reference voltage: AVCC
   cbi(ADMUX, REFS1);
   sbi(ADMUX, REFS0);
 
-  // Ergebnis linksjustiert → ADCH enthält oberes 8-Bit
+  // Result left-justified -> ADCH contains upper 8 bits
   sbi(ADMUX, ADLAR);
 
   // ADC Prescaler = 128 (16 MHz / 128 = 125 kHz)
@@ -123,19 +178,21 @@ void adc_init(void)
   sbi(ADCSRA, ADPS1);
   sbi(ADCSRA, ADPS0);
 
-  // ADC einschalten
+  // Enable ADC
   sbi(ADCSRA, ADEN);
 
-  // PortC als Eingang (für die ADC-Kanäle)
+  // Set PortC as input (for ADC channels)
   DDRC = 0x00;
   PORTC = 0x00;
 }
 
 /*
-Sets Channel, Read and Return ADC Results
-Voraussetzung: ADLAR=1 (linksjustiert) -> Rückgabe aus ADCH (8 Bit)
+Read ADC value from specified channel
+Parameters:
+- channel: ADC input channel (0-7)
+Returns: 8-bit conversion result
 */
-unsigned char adcread(unsigned char channel)
+uint8_t adcread(uint8_t channel)
 {
   if (!(ADCSRA & (1 << ADEN)) || channel > 7)
     return 0;
@@ -146,14 +203,14 @@ unsigned char adcread(unsigned char channel)
   // ADIF vor Messablauf löschen (write-1-to-clear)
   ADCSRA |= (1 << ADIF);
 
-  // Dummy-Konversion nach MUX-Wechsel (erstes Sample verwerfen)
+  // Dummy conversion after MUX change (discard first sample)
   ADCSRA |= (1 << ADSC);
   while (ADCSRA & (1 << ADSC))
   {
   }
-  (void)ADCH; // Dummy-Wert verwerfen
+  (void)ADCH; // Discard dummy value
 
-  // Echte Messung
+  // Actual measurement
   ADCSRA |= (1 << ADSC);
   uint16_t timeout = 10000;
   while ((ADCSRA & (1 << ADSC)) && --timeout)
@@ -165,274 +222,269 @@ unsigned char adcread(unsigned char channel)
   // ADIF nach Abschluss löschen (optional, aber sauber)
   ADCSRA |= (1 << ADIF);
 
-  return ADCH; // linksjustiert → oberes Byte
+  // left-justified -> upper byte
+  return ADCH;
 }
 
 /*
-Create a array of values from output signal(acdread(3)) as sample storage
+Create array of values from output signal (adcread(3)) as sample storage
+→ Now: initialize all 256 cells
 */
-void initcell(unsigned char *cells)
+void initcell(uint8_t *cells)
 {
-  unsigned char x;
-  for (x = 0; x < MAX_SAM; x++)
+  for (uint16_t x = 0; x < CELLS_LEN; x++)
   {
     cells[x] = adcread(3); // get output signal
   }
 }
 
-/*Filter Function: Shift Left */
+/* ---------------------------------------------------------------------- */
+/* Filter Functions                                                      */
+/* ---------------------------------------------------------------------- */
+
 void leftsh(unsigned int cel)
 {
   uint8_t k = clamp_filterk(filterk);
   OCR1A = cel << k;
 }
-/*Filter Function: Shift Right */
 void rightsh(unsigned int cel)
 {
   uint8_t k = clamp_filterk(filterk);
   OCR1A = cel >> k;
 }
-/*Filter Function: Multiply */
 void mult(unsigned int cel)
 {
   uint8_t k = clamp_filterk(filterk);
   OCR1A = cel * k;
 }
-/*Filter Function: Division */
 void divvv(unsigned int cel)
 {
   uint8_t k = clamp_filterk(filterk);
   OCR1A = cel / (k + 1);
 }
-/*
-Pointer Function for Filter Assignments
-Functions modify Clock Frequenz of Filter Max7400
-*/
+
+/* Pointer to filter functions */
 void (*filtermod[])(unsigned int cel) = {leftsh, rightsh, mult, divvv};
 
-// first attempt - add in DATA POINTER= omem
+/* ---------------------------------------------------------------------- */
+/* instructionsetfirst                                                    */
+/* ---------------------------------------------------------------------- */
 
-/* instructionsetfirst */
-
-/*Modify Filter Frequenz of Max7400 Filter*/
-unsigned char outff(unsigned char *cells, unsigned char IP)
+uint8_t outff(uint8_t *cells, uint8_t IP)
 {
-  //  OCR1A=(int)omem<<filterk;
   (*filtermod[qqq])((int)cells[omem]);
-  return IP + insdir;
+  return (uint8_t)(IP + insdir);
 }
 
-unsigned char outpp(unsigned char *cells, unsigned char IP)
+uint8_t outpp(uint8_t *cells, uint8_t IP)
 {
   OCR0A = omem;
-  return IP + insdir;
+  return (uint8_t)(IP + insdir);
 }
 
-unsigned char finc(unsigned char *cells, unsigned char IP)
+uint8_t finc(uint8_t *cells, uint8_t IP)
 {
-  /* [1.1] omem innerhalb der Zellfläche wrappen */
-  omem = (uint8_t)wrap_u16((int32_t)omem + 1, CELLS_LEN);
-  return IP + insdir;
+  omem_inc();
+  return (uint8_t)(IP + insdir);
 }
 
-unsigned char fdec(unsigned char *cells, unsigned char IP)
+uint8_t fdec(uint8_t *cells, uint8_t IP)
 {
-  /* [1.1] omem innerhalb der Zellfläche wrappen */
-  omem = (uint8_t)wrap_u16((int32_t)omem - 1, CELLS_LEN);
-  return IP + insdir;
+  omem_dec();
+  return (uint8_t)(IP + insdir);
 }
 
-unsigned char fincm(unsigned char *cells, unsigned char IP)
+uint8_t fincm(uint8_t *cells, uint8_t IP)
 {
   cells[omem]++;
-  return IP + insdir;
+  return (uint8_t)(IP + insdir);
 }
 
-unsigned char fdecm(unsigned char *cells, unsigned char IP)
+uint8_t fdecm(uint8_t *cells, uint8_t IP)
 {
   cells[omem]--;
-  return IP + insdir;
+  return (uint8_t)(IP + insdir);
 }
 
 /* get omem from Output*/
-unsigned char fin1(unsigned char *cells, unsigned char IP)
+uint8_t fin1(uint8_t *cells, uint8_t IP)
 {
   omem = adcread(3); // get output signal
-  return IP + insdir;
+  return (uint8_t)(IP + insdir);
 }
 
-/*get omem from Poti 3 */
-unsigned char fin2(unsigned char *cells, unsigned char IP)
+/* get omem from Poti 3 */
+uint8_t fin2(uint8_t *cells, uint8_t IP)
 {
   omem = adcread(2);
-  return IP + insdir;
+  return (uint8_t)(IP + insdir);
 }
-/*get IP from Poti 3*/
-unsigned char fin3(unsigned char *cells, unsigned char IP)
+/* get IP from Poti 3 */
+uint8_t fin3(uint8_t *cells, uint8_t IP)
 {
   IP = adcread(2);
-  return IP + insdir;
+  return (uint8_t)(IP + insdir);
 }
 /**/
-unsigned char fin4(unsigned char *cells, unsigned char IP)
+uint8_t fin4(uint8_t *cells, uint8_t IP)
 {
-  if (omem < MAX_SAM)
+  if (omem < CELLS_LEN)
   {
     cells[omem] = adcread(3); // get output signal
   }
-  return IP + insdir;
+  return (uint8_t)(IP + insdir);
 }
 
-unsigned char outf(unsigned char *cells, unsigned char IP)
+uint8_t outf(uint8_t *cells, uint8_t IP)
 {
-  //  OCR1A=(int)cells[omem]<<filterk;
   (*filtermod[qqq])((int)cells[omem]);
-  return IP + insdir;
+  return (uint8_t)(IP + insdir);
 }
 
-unsigned char outp(unsigned char *cells, unsigned char IP)
+uint8_t outp(uint8_t *cells, uint8_t IP)
 {
   OCR0A = cells[omem];
-  return IP + insdir;
+  return (uint8_t)(IP + insdir);
 }
 
-unsigned char plus(unsigned char *cells, unsigned char IP)
+uint8_t plus(uint8_t *cells, uint8_t IP)
 {
-  cells[IP] += 1;
-  return IP + insdir;
+  CSET(cells, IP, (uint8_t)(CGET(cells, IP) + 1));
+  return (uint8_t)(IP + insdir);
 }
 
-unsigned char minus(unsigned char *cells, unsigned char IP)
+uint8_t minus(uint8_t *cells, uint8_t IP)
 {
-  cells[IP] -= 1;
-  return IP + insdir;
+  CSET(cells, IP, (uint8_t)(CGET(cells, IP) - 1));
+  return (uint8_t)(IP + insdir);
 }
 
-unsigned char bitshift1(unsigned char *cells, unsigned char IP)
+uint8_t bitshift1(uint8_t *cells, uint8_t IP)
 {
-  cells[IP] = cells[IP] << 1;
-  return IP + insdir;
+  CSET(cells, IP, (uint8_t)(CGET(cells, IP) << 1));
+  return (uint8_t)(IP + insdir);
 }
 
-unsigned char bitshift2(unsigned char *cells, unsigned char IP)
+uint8_t bitshift2(uint8_t *cells, uint8_t IP)
 {
-  cells[IP] = cells[IP] << 2;
-  return IP + insdir;
+  CSET(cells, IP, (uint8_t)(CGET(cells, IP) << 2));
+  return (uint8_t)(IP + insdir);
 }
 
-unsigned char bitshift3(unsigned char *cells, unsigned char IP)
+uint8_t bitshift3(uint8_t *cells, uint8_t IP)
 {
-  cells[IP] = cells[IP] << 3;
-  return IP + insdir;
+  CSET(cells, IP, (uint8_t)(CGET(cells, IP) << 3));
+  return (uint8_t)(IP + insdir);
 }
 
-unsigned char branch(unsigned char *cells, unsigned char IP)
+uint8_t branch(uint8_t *cells, uint8_t IP)
 {
-  if (cells[IP + 1] == 0)
-    IP = cells[omem];
-  return IP + insdir;
+  if (CGET(cells, IP_RIGHT(IP)) == 0)
+    IP = CGET(cells, omem);
+  return (uint8_t)(IP + insdir);
 }
 
-unsigned char jump(unsigned char *cells, unsigned char IP)
+uint8_t jump(uint8_t *cells, uint8_t IP)
 {
-  if (cells[(IP + 1)] < 128)
-    return IP + cells[(IP + 1)];
+  uint8_t off = CGET(cells, IP_RIGHT(IP));
+  if (off < 128)
+    return (uint8_t)(IP + off);
   else
-    return IP + insdir;
+    return (uint8_t)(IP + insdir);
 }
 
-unsigned char infect(unsigned char *cells, unsigned char IP)
+uint8_t infect(uint8_t *cells, uint8_t IP)
 {
-  int x = IP - 1;
-  if (x < 0)
-    x = MAX_SAM;
-  if (cells[x] < 128)
-    cells[(IP + 1)] = cells[IP];
-  return IP + insdir;
+  uint8_t left = IP_LEFT(IP);
+  if (CGET(cells, left) < 128)
+    CSET(cells, IP_RIGHT(IP), CGET(cells, IP));
+  return (uint8_t)(IP + insdir);
 }
 
-unsigned char store(unsigned char *cells, unsigned char IP)
+uint8_t store(uint8_t *cells, uint8_t IP)
 {
-  cells[IP] = cells[cells[IP + 1]];
-  return IP + insdir;
+  uint8_t addr = CGET(cells, IP_RIGHT(IP));
+  CSET(cells, IP, CGET(cells, addr));
+  return (uint8_t)(IP + insdir);
 }
 
-unsigned char writeknob(unsigned char *cells, unsigned char IP)
+uint8_t writeknob(uint8_t *cells, uint8_t IP)
 {
-  cells[IP] = adcread(2);
-  return IP + insdir;
+  CSET(cells, IP, adcread(2));
+  return (uint8_t)(IP + insdir);
 }
 
-unsigned char writesamp(unsigned char *cells, unsigned char IP)
+uint8_t writesamp(uint8_t *cells, uint8_t IP)
 {
-  cells[IP] = adcread(3); // get output signal
-  return IP + insdir;
+  CSET(cells, IP, adcread(3)); // get output signal
+  return (uint8_t)(IP + insdir);
 }
 
-unsigned char skip(unsigned char *cells, unsigned char IP)
+uint8_t skip(uint8_t *cells, uint8_t IP)
 {
-  return IP + insdir;
+  return (uint8_t)(IP + insdir);
 }
 
 // Sets direction
-unsigned char direction(unsigned char *cells, unsigned char IP)
+uint8_t direction(uint8_t *cells, uint8_t IP)
 {
   if (dir < 0)
     dir = 1;
   else
     dir = -1;
-  return IP + insdir;
+  return (uint8_t)(IP + insdir);
 }
 
 // do nothing
-unsigned char die(unsigned char *cells, unsigned char IP)
+uint8_t die(uint8_t *cells, uint8_t IP)
 {
-  return IP + insdir;
+  return (uint8_t)(IP + insdir);
 }
 
-/* instructionsetplague */
-/* Plague Algorithms*/
+/* ---------------------------------------------------------------------- */
+/* instructionsetplague                                                   */
+/* ---------------------------------------------------------------------- */
 
-unsigned char ploutf(unsigned char *cells, unsigned char IP)
+uint8_t ploutf(uint8_t *cells, uint8_t IP)
 {
-  //  OCR1A=((int)cells[IP+1]+(int)cells[IP-1])<<filterk;
   (*filtermod[qqq])((int)cells[omem]);
-
-  return IP + insdir;
+  return (uint8_t)(IP + insdir);
 }
 
-unsigned char ploutp(unsigned char *cells, unsigned char IP)
+uint8_t ploutp(uint8_t *cells, uint8_t IP)
 {
-  OCR0A = cells[IP + 1] + cells[IP - 1];
-  return IP + insdir;
+  uint8_t a = CGET1(cells, (int32_t)IP + 1);
+  uint8_t b = CGET1(cells, (int32_t)IP - 1);
+  OCR0A = (uint8_t)(a + b);
+  return (uint8_t)(IP + insdir);
 }
 
-unsigned char plenclose(unsigned char *cells, unsigned char IP)
+uint8_t plenclose(uint8_t *cells, uint8_t IP)
 {
-  cells[IP] = 255;
-  cells[IP + 1] = 255;
-  return IP + 2;
+  CSET1(cells, IP, 255);
+  CSET1(cells, (int32_t)IP + 1, 255);
+  return (uint8_t)(IP + 2);
 }
 
-unsigned char plinfect(unsigned char *cells, unsigned char IP)
+uint8_t plinfect(uint8_t *cells, uint8_t IP)
 {
-
-  if (cells[IP] < 128)
+  uint8_t cur = CGET1(cells, IP);
+  if (cur < 128)
   {
-    cells[IP + 1] = cells[IP];
-    cells[IP - 1] = cells[IP];
+    CSET1(cells, (int32_t)IP + 1, cur);
+    CSET1(cells, (int32_t)IP - 1, cur);
   }
-  return IP + insdir;
+  return (uint8_t)(IP + insdir);
 }
 
-unsigned char pldie(unsigned char *cells, unsigned char IP)
+uint8_t pldie(uint8_t *cells, uint8_t IP)
 {
-  cells[IP - 1] = 0;
-  cells[IP + 1] = 0;
-  return IP + insdir;
+  CSET1(cells, (int32_t)IP - 1, 0);
+  CSET1(cells, (int32_t)IP + 1, 0);
+  return (uint8_t)(IP + insdir);
 }
 
-unsigned char plwalk(uint8_t *cells, uint8_t IP)
+uint8_t plwalk(uint8_t *cells, uint8_t IP)
 {
   if (dir < 0 && (CGET(cells, IP) & 0x03) == 1)
     dir = +1;
@@ -448,59 +500,56 @@ unsigned char plwalk(uint8_t *cells, uint8_t IP)
   return (uint8_t)(IP + insdir);
 }
 
-/* instructionsetbf */
-/* instructionsetplague */
-/* Brainfuck*/
+/* ---------------------------------------------------------------------- */
+/* instructionsetbf                                                       */
+/* ---------------------------------------------------------------------- */
 
-unsigned char bfinc(unsigned char *cells, unsigned char IP)
+uint8_t bfinc(uint8_t *cells, uint8_t IP)
 {
-  /* [1.1] omem innerhalb der Zellfläche wrappen */
-  omem = (uint8_t)wrap_u16((int32_t)omem + 1, CELLS_LEN);
+  omem_inc();
   return ++IP;
 }
 
-unsigned char bfdec(unsigned char *cells, unsigned char IP)
+uint8_t bfdec(uint8_t *cells, uint8_t IP)
 {
-  /* [1.1] omem innerhalb der Zellfläche wrappen */
-  omem = (uint8_t)wrap_u16((int32_t)omem - 1, CELLS_LEN);
+  omem_dec();
   return ++IP;
 }
 
-unsigned char bfincm(unsigned char *cells, unsigned char IP)
+uint8_t bfincm(uint8_t *cells, uint8_t IP)
 {
   cells[omem]++;
   return ++IP;
 }
 
-unsigned char bfdecm(unsigned char *cells, unsigned char IP)
+uint8_t bfdecm(uint8_t *cells, uint8_t IP)
 {
   cells[omem]--;
   return ++IP;
 }
 
-unsigned char bfoutf(unsigned char *cells, unsigned char IP)
+uint8_t bfoutf(uint8_t *cells, uint8_t IP)
 {
-  //  OCR1A=(int)cells[omem]<<filterk;
   (*filtermod[qqq])((int)cells[omem]);
   return ++IP;
 }
 
-unsigned char bfoutp(unsigned char *cells, unsigned char IP)
+uint8_t bfoutp(uint8_t *cells, uint8_t IP)
 {
   OCR0A = cells[omem];
   return ++IP;
 }
 
-unsigned char bfin(unsigned char *cells, unsigned char IP)
+uint8_t bfin(uint8_t *cells, uint8_t IP)
 {
-  if (omem < MAX_SAM)
+  if (omem < CELLS_LEN)
   {
     cells[omem] = adcread(3); // get output signal
   }
   return ++IP;
 }
 
-unsigned char bfbrac1(uint8_t *cells, uint8_t IP)
+uint8_t bfbrac1(uint8_t *cells, uint8_t IP)
 {
   if (cycle < 19)
   {
@@ -509,7 +558,7 @@ unsigned char bfbrac1(uint8_t *cells, uint8_t IP)
   }
   return ++IP;
 }
-unsigned char bfbrac2(uint8_t *cells, uint8_t IP)
+uint8_t bfbrac2(uint8_t *cells, uint8_t IP)
 {
   if (cycle >= 0 && cells[omem] != 0)
     return (uint8_t)(ostack[cycle]);
@@ -518,109 +567,113 @@ unsigned char bfbrac2(uint8_t *cells, uint8_t IP)
   return ++IP;
 }
 
-/* instructionsetSIR */
-// SIR: inc if , die if, recover if, getinfected if
+/* ---------------------------------------------------------------------- */
+/* instructionsetSIR                                                      */
+/* ---------------------------------------------------------------------- */
 
-unsigned char SIRoutf(unsigned char *cells, unsigned char IP)
+uint8_t SIRoutf(uint8_t *cells, uint8_t IP)
 {
-  //  OCR1A=((int)cells[(IP+1)]+(int)cells[IP-1])<<filterk;
-  (*filtermod[qqq])((int)cells[(IP + 1)] + (int)cells[IP - 1]);
-
-  return IP + insdir;
+  (*filtermod[qqq])((int)CGET1(cells, (int32_t)IP + 1) + (int)CGET1(cells, (int32_t)IP - 1));
+  return (uint8_t)(IP + insdir);
 }
 
-unsigned char SIRoutp(unsigned char *cells, unsigned char IP)
+uint8_t SIRoutp(uint8_t *cells, uint8_t IP)
 {
-  OCR0A = cells[(IP + 1)] + cells[IP - 1]; // neg?
-  return IP + insdir;
+  OCR0A = (uint8_t)(CGET1(cells, (int32_t)IP + 1) + CGET1(cells, (int32_t)IP - 1));
+  return (uint8_t)(IP + insdir);
 }
 
-unsigned char SIRincif(unsigned char *cells, unsigned char IP)
+/* --------- Leichtgewichtiger PRNG (ersetzt rand()) --------- */
+static uint8_t lfsr = 0xA5;
+static inline uint8_t prng8(void)
 {
-  if ((cells[(IP + 1)] > 0 && cells[(IP + 1)] < 128))
-    cells[IP]++;
-  return IP + insdir;
+  uint8_t x = lfsr;
+  x ^= (uint8_t)(x << 3);
+  x ^= (uint8_t)(x >> 5);
+  x ^= (uint8_t)(x << 1);
+  lfsr = x;
+  return x;
 }
 
-unsigned char SIRdieif(unsigned char *cells, unsigned char IP)
+uint8_t SIRincif(uint8_t *cells, uint8_t IP)
 {
+  if ((CGET1(cells, (int32_t)IP + 1) > 0 && CGET1(cells, (int32_t)IP + 1) < 128))
+    CSET(cells, IP, (uint8_t)(CGET(cells, IP) + 1));
+  return (uint8_t)(IP + insdir);
+}
 
-  if ((cells[(IP + 1)] > 0 && cells[(IP + 1)] < 128))
+uint8_t SIRdieif(uint8_t *cells, uint8_t IP)
+{
+  if ((CGET1(cells, (int32_t)IP + 1) > 0 && CGET1(cells, (int32_t)IP + 1) < 128))
   {
-    if (rand() % 10 < 4)
-      cells[IP] = dead;
+    if ((prng8() % 10) < 4)
+      CSET(cells, IP, dead);
   }
-  return IP + insdir;
+  return (uint8_t)(IP + insdir);
 }
 
-unsigned char SIRrecif(unsigned char *cells, unsigned char IP)
+uint8_t SIRrecif(uint8_t *cells, uint8_t IP)
 {
-  if (cells[(IP + 1)] >= 128)
-    cells[IP] = recovered;
-  return IP + insdir;
+  if (CGET1(cells, (int32_t)IP + 1) >= 128)
+    CSET(cells, IP, recovered);
+  return (uint8_t)(IP + insdir);
 }
 
-unsigned char SIRinfif(unsigned char *cells, unsigned char IP)
+uint8_t SIRinfif(uint8_t *cells, uint8_t IP)
 {
-
-  if (cells[(IP + 1)] == 0)
+  if (CGET1(cells, (int32_t)IP + 1) == 0)
   {
-
-    if ((cells[IP - 1] > 0 && cells[IP - 1] < 128) ||
-        (cells[(IP + 1)] > 0 && cells[(IP + 1)] < 128))
+    if ((CGET1(cells, (int32_t)IP - 1) > 0 && CGET1(cells, (int32_t)IP - 1) < 128) ||
+        (CGET1(cells, (int32_t)IP + 1) > 0 && CGET1(cells, (int32_t)IP + 1) < 128))
     {
-      if (rand() % 10 < 4)
-        cells[IP] = 1;
+      if ((prng8() % 10) < 4)
+        CSET(cells, IP, 1);
     }
   }
-  return IP + insdir;
+  return (uint8_t)(IP + insdir);
 }
 
-/* instructionsetredcode */
-// red code
+/* ---------------------------------------------------------------------- */
+/* instructionsetredcode                                                  */
+/* ---------------------------------------------------------------------- */
 
-unsigned char rdmov(unsigned char *cells, unsigned char IP)
+uint8_t rdmov(uint8_t *cells, uint8_t IP)
 {
-  // cells[(IP + cells[IP + 2])] = cells[(IP + cells[IP + 1])];
   uint8_t off1 = CGET(cells, IP + 1);
   uint8_t off2 = CGET(cells, IP + 2);
   uint8_t src = CGET(cells, (int32_t)IP + off1);
   CSET(cells, (int32_t)IP + off2, src);
-  return IP + 3;
+  return (uint8_t)(IP + 3);
 }
 
-unsigned char rdadd(unsigned char *cells, unsigned char IP)
+uint8_t rdadd(uint8_t *cells, uint8_t IP)
 {
-  // cells[(IP + cells[IP + 2])] = cells[(IP + cells[IP + 2])] + cells[(IP + cells[IP + 1])];
   uint8_t off1 = CGET(cells, IP + 1);
   uint8_t off2 = CGET(cells, IP + 2);
   uint8_t dstv = CGET(cells, (int32_t)IP + off2);
   uint8_t srcv = CGET(cells, (int32_t)IP + off1);
   CSET(cells, (int32_t)IP + off2, (uint8_t)(dstv + srcv));
-  return IP + 3;
+  return (uint8_t)(IP + 3);
 }
 
-unsigned char rdsub(unsigned char *cells, unsigned char IP)
+uint8_t rdsub(uint8_t *cells, uint8_t IP)
 {
-  // cells[(IP + cells[IP + 2])] = cells[(IP + cells[IP + 2])] - cells[(IP + cells[IP + 1])];
   uint8_t off1 = CGET(cells, IP + 1);
   uint8_t off2 = CGET(cells, IP + 2);
   uint8_t dstv = CGET(cells, (int32_t)IP + off2);
   uint8_t srcv = CGET(cells, (int32_t)IP + off1);
   CSET(cells, (int32_t)IP + off2, (uint8_t)(dstv - srcv));
-  return IP + 3;
+  return (uint8_t)(IP + 3);
 }
 
-unsigned char rdjmp(unsigned char *cells, unsigned char IP)
+uint8_t rdjmp(uint8_t *cells, uint8_t IP)
 {
-  // IP = IP + cells[IP + 1];
   uint8_t off = CGET(cells, IP + 1);
   return (uint8_t)(IP + off);
 }
 
-unsigned char rdjmz(unsigned char *cells, unsigned char IP)
+uint8_t rdjmz(uint8_t *cells, uint8_t IP)
 {
-  // if (cells[(IP + cells[IP + 2])] == 0) IP = cells[IP + 1]; else IP += 3;
   uint8_t off2 = CGET(cells, IP + 2);
   if (CGET(cells, (int32_t)IP + off2) == 0)
     return CGET(cells, IP + 1);
@@ -628,9 +681,8 @@ unsigned char rdjmz(unsigned char *cells, unsigned char IP)
     return (uint8_t)(IP + 3);
 }
 
-unsigned char rdjmg(unsigned char *cells, unsigned char IP)
+uint8_t rdjmg(uint8_t *cells, uint8_t IP)
 {
-  // if (cells[(IP + cells[IP + 2])] >= 0) ...  // >=0 immer wahr bei uint8_t → >0
   uint8_t off2 = CGET(cells, IP + 2);
   if (CGET(cells, (int32_t)IP + off2) > 0)
     return CGET(cells, IP + 1);
@@ -638,9 +690,8 @@ unsigned char rdjmg(unsigned char *cells, unsigned char IP)
     return (uint8_t)(IP + 3);
 }
 
-unsigned char rddjz(unsigned char *cells, unsigned char IP)
+uint8_t rddjz(uint8_t *cells, uint8_t IP)
 {
-  // x = (IP + cells[IP + 2]); cells[x] = cells[x] - 1; if (cells[x] == 0) ...
   uint8_t off2 = CGET(cells, IP + 2);
   int32_t x = (int32_t)IP + off2;
   uint8_t xv = CGET(cells, x);
@@ -652,15 +703,14 @@ unsigned char rddjz(unsigned char *cells, unsigned char IP)
     return (uint8_t)(IP + 3);
 }
 
-unsigned char rddat(unsigned char *cells, unsigned char IP)
+uint8_t rddat(uint8_t *cells, uint8_t IP)
 {
   IP += 3;
   return IP;
 }
 
-unsigned char rdcmp(unsigned char *cells, unsigned char IP)
+uint8_t rdcmp(uint8_t *cells, uint8_t IP)
 {
-  // if (cells[(IP + cells[IP + 2])] != cells[(IP + cells[IP + 1])]) IP += 6; else IP += 3;
   uint8_t off1 = CGET(cells, IP + 1);
   uint8_t off2 = CGET(cells, IP + 2);
   if (CGET(cells, (int32_t)IP + off2) != CGET(cells, (int32_t)IP + off1))
@@ -669,24 +719,23 @@ unsigned char rdcmp(unsigned char *cells, unsigned char IP)
     return (uint8_t)(IP + 3);
 }
 
-unsigned char rdoutf(unsigned char *cells, unsigned char IP)
+uint8_t rdoutf(uint8_t *cells, uint8_t IP)
 {
-  // (*filtermod[qqq])((int)cells[IP + 1]);
   (*filtermod[qqq])((int)CGET(cells, IP + 1));
   return (uint8_t)(IP + 3);
 }
 
-unsigned char rdoutp(unsigned char *cells, unsigned char IP)
+uint8_t rdoutp(uint8_t *cells, uint8_t IP)
 {
   OCR0A = CGET(cells, IP + 2);
   return (uint8_t)(IP + 3);
 }
 
-/* instructionsetbiota */
+/* ---------------------------------------------------------------------- */
+/* instructionsetbiota                                                    */
+/* ---------------------------------------------------------------------- */
 
-// BIOTA!
-
-unsigned char btempty(unsigned char *cells, unsigned char IP)
+uint8_t btempty(uint8_t *cells, uint8_t IP)
 {
   // turn around
   if (btdir == 0)
@@ -700,30 +749,28 @@ unsigned char btempty(unsigned char *cells, unsigned char IP)
   return IP;
 }
 
-unsigned char btoutf(unsigned char *cells, unsigned char IP)
+uint8_t btoutf(uint8_t *cells, uint8_t IP)
 {
-  //  OCR1A=(int)cells[omem]<<filterk;
   (*filtermod[qqq])((int)cells[omem]);
-
   return IP;
 }
 
-unsigned char btoutp(unsigned char *cells, unsigned char IP)
+uint8_t btoutp(uint8_t *cells, uint8_t IP)
 {
   OCR0A = cells[omem];
   return IP;
 }
 
-unsigned char btstraight(unsigned char *cells, unsigned char IP)
+uint8_t btstraight(uint8_t *cells, uint8_t IP)
 {
   if (dcdir == 0)
-    omem += 1;
+    omem = omem_move(omem, +1, 0);
   else if (dcdir == 1)
-    omem -= 1;
+    omem = omem_move(omem, -1, 0);
   else if (dcdir == 2)
-    omem += 16;
+    omem = omem_move(omem, 0, +1);
   else if (dcdir == 3)
-    omem -= 16;
+    omem = omem_move(omem, 0, -1);
 
   if (cells[omem] == 0)
   { // change dir
@@ -739,16 +786,16 @@ unsigned char btstraight(unsigned char *cells, unsigned char IP)
   return IP;
 }
 
-unsigned char btbackup(unsigned char *cells, unsigned char IP)
+uint8_t btbackup(uint8_t *cells, uint8_t IP)
 {
   if (dcdir == 0)
-    omem -= 1;
+    omem = omem_move(omem, -1, 0);
   else if (dcdir == 1)
-    omem += 1;
+    omem = omem_move(omem, +1, 0);
   else if (dcdir == 2)
-    omem -= 16;
+    omem = omem_move(omem, 0, -1);
   else if (dcdir == 3)
-    omem += 16;
+    omem = omem_move(omem, 0, +1);
   if (cells[omem] == 0)
   {
     if (btdir == 0)
@@ -763,51 +810,51 @@ unsigned char btbackup(unsigned char *cells, unsigned char IP)
   return IP;
 }
 
-unsigned char btturn(unsigned char *cells, unsigned char IP)
+uint8_t btturn(uint8_t *cells, uint8_t IP)
 {
   if (dcdir == 0)
-    omem += 16;
+    omem = omem_move(omem, 0, +1);
   else if (dcdir == 1)
-    omem -= 16;
+    omem = omem_move(omem, 0, -1);
   else if (dcdir == 2)
-    omem += 1;
+    omem = omem_move(omem, +1, 0);
   else if (dcdir == 3)
-    omem -= 1;
+    omem = omem_move(omem, -1, 0);
   return IP;
 }
 
-unsigned char btunturn(unsigned char *cells, unsigned char IP)
+uint8_t btunturn(uint8_t *cells, uint8_t IP)
 {
   if (dcdir == 0)
-    omem -= 16;
+    omem = omem_move(omem, 0, -1);
   else if (dcdir == 1)
-    omem += 16;
+    omem = omem_move(omem, 0, +1);
   else if (dcdir == 2)
-    omem -= 1;
+    omem = omem_move(omem, -1, 0);
   else if (dcdir == 3)
-    omem += 1;
+    omem = omem_move(omem, +1, 0);
   return IP;
 }
 
-unsigned char btg(unsigned char *cells, unsigned char IP)
+uint8_t btg(uint8_t *cells, uint8_t IP)
 {
-  unsigned char x = 0;
+  uint8_t x = 0;
   while (x < 20 && cells[omem] != 0)
   {
     if (dcdir == 0)
-      omem += 1;
+      omem = omem_move(omem, +1, 0);
     else if (dcdir == 1)
-      omem -= 1;
+      omem = omem_move(omem, -1, 0);
     else if (dcdir == 2)
-      omem += 16;
+      omem = omem_move(omem, 0, +1);
     else if (dcdir == 3)
-      omem -= 16;
+      omem = omem_move(omem, 0, -1);
     x++;
   }
   return IP;
 }
 
-unsigned char btclear(unsigned char *cells, unsigned char IP)
+uint8_t btclear(uint8_t *cells, uint8_t IP)
 {
   if (cells[omem] == 0)
   {
@@ -821,13 +868,13 @@ unsigned char btclear(unsigned char *cells, unsigned char IP)
       btdir = 2;
   }
   else
-    cells[omem] = 0;
+    CSET1(cells, omem, 0);
   return IP;
 }
 
-unsigned char btdup(unsigned char *cells, unsigned char IP)
+uint8_t btdup(uint8_t *cells, uint8_t IP)
 {
-  if (cells[omem] == 0 || cells[omem - 1] != 0)
+  if (cells[omem] == 0 || CGET1(cells, (int32_t)omem - 1) != 0)
   {
     if (btdir == 0)
       btdir = 1;
@@ -839,45 +886,42 @@ unsigned char btdup(unsigned char *cells, unsigned char IP)
       btdir = 2;
   }
   else
-    cells[omem - 1] = cells[omem];
+    CSET1(cells, (int32_t)omem - 1, cells[omem]);
   return IP;
 }
 
-/* instructionsetreddeath */
+/* ---------------------------------------------------------------------- */
+/* instructionsetreddeath                                                 */
+/* ---------------------------------------------------------------------- */
 
-// 1- the plague within (12 midnight) - all the cells infect
-
-unsigned char redplague(unsigned char *cells, unsigned char IP)
+uint8_t redplague(uint8_t *cells, uint8_t IP)
 {
   if (clock == 12)
   {
     clock = 12;
-    cells[IP + 1] = cells[IP];
+    CSET(cells, IP_RIGHT(IP), CGET(cells, IP));
     if (IP == 255)
       clock = 13;
-    return IP + 1;
+    return (uint8_t)(IP + 1);
   }
   else
-    return IP + insdir;
+    return (uint8_t)(IP + insdir);
 }
 
-// 3- death - one by one fall dead
-unsigned char reddeath(unsigned char *cells, unsigned char IP)
+uint8_t reddeath(uint8_t *cells, uint8_t IP)
 {
   if (clock == 13)
   {
     clock = 13;
-    // cells[IP + count] = adcread(3); count++;
     count = (uint8_t)((count + 1) % CELLS_LEN);
     CSET(cells, (int32_t)IP + count, adcread(3)); // get output signal
     return IP;                                    // just keeps on going
   }
   else
-    return IP + insdir;
+    return (uint8_t)(IP + insdir);
 }
 
-// 2- clock every hour - instruction counter or IP -some kind of TICK
-unsigned char redclock(unsigned char *cells, unsigned char IP)
+uint8_t redclock(uint8_t *cells, uint8_t IP)
 {
   clock++;
   if (clock % 60 == 0)
@@ -886,221 +930,226 @@ unsigned char redclock(unsigned char *cells, unsigned char IP)
     return IP; // everyone stops
   }
   else
-    return IP + insdir;
+    return (uint8_t)(IP + insdir);
 }
 
-// 4- seven rooms: divide cellspace into 7 - 7 layers with filter each
-unsigned char redrooms(unsigned char *cells, unsigned char IP)
+uint8_t redrooms(uint8_t *cells, uint8_t IP)
 {
   switch (IP % 7)
   {
   case 0:
-    // blue
     sbi(DDRB, PORTB1);
     TCCR1B = (1 << WGM12) | (1 << CS10); // no divider
     filterk = 8;
     break;
   case 1:
-    // purple
     sbi(DDRB, PORTB1);
     TCCR1B = (1 << WGM12) | (1 << CS10); // no divider
     break;
   case 2:
-    // green
     sbi(DDRB, PORTB1);
     TCCR1B = (1 << WGM12) | (1 << CS11); // divide by 8
     filterk = 8;
     break;
   case 3:
-    // orange
     sbi(DDRB, PORTB1);
     TCCR1B = (1 << WGM12) | (1 << CS11); // divide by 8
     break;
   case 4:
-    // white
     sbi(DDRB, PORTB1);
     TCCR1B = (1 << WGM12) | (1 << CS11) | (1 << CS10); // divide by 64
     break;
   case 5:
-    // violet
     sbi(DDRB, PORTB1);
     TCCR1B = (1 << WGM12) | (1 << CS12); // 256
     break;
   case 6:
-    // black
     cbi(DDRB, PORTB1); // filter off
   }
-  return IP + insdir;
+  return (uint8_t)(IP + insdir);
 }
 
-// 5- unmasking (change neighbouring cells)
-
-unsigned char redunmask(unsigned char *cells, unsigned char IP)
+uint8_t redunmask(uint8_t *cells, uint8_t IP)
 {
-  cells[IP - 1] ^= 255;
-  cells[IP + 1] ^= 255;
-  return IP + insdir;
+  uint8_t vL = CGET1(cells, (int32_t)IP - 1) ^ 255;
+  uint8_t vR = CGET1(cells, (int32_t)IP + 1) ^ 255;
+  CSET1(cells, (int32_t)IP - 1, vL);
+  CSET1(cells, (int32_t)IP + 1, vR);
+  return (uint8_t)(IP + insdir);
 }
-// 6- the prince (omem) - the output! walking through 7 rooms
 
-unsigned char redprospero(unsigned char *cells, unsigned char IP)
+uint8_t redprospero(uint8_t *cells, uint8_t IP)
 {
-
-  unsigned char dirrr;
-  // prince/omem moves at random through rooms
-  dirrr = adcread(3) % 4; // get output signal
+  uint8_t dirrr = adcread(3) % 4; // get output signal
   if (dirrr == 0)
-    omem = omem + 1;
+    omem = omem_move(omem, +1, 0);
   else if (dirrr == 1)
-    omem = omem - 1;
+    omem = omem_move(omem, -1, 0);
   else if (dirrr == 2)
-    omem = omem + 16;
+    omem = omem_move(omem, 0, +1);
   else if (dirrr == 3)
-    omem = omem - 16;
+    omem = omem_move(omem, 0, -1);
 
-  // output
   OCR0A = cells[omem];
-  return IP + insdir;
+  return (uint8_t)(IP + insdir);
 }
 
-// 7- the outside - the input!
-unsigned char redoutside(unsigned char *cells, unsigned char IP)
+uint8_t redoutside(uint8_t *cells, uint8_t IP)
 {
-
-  // input sample to cell (which one neighbour to omem)
-  cells[omem + 1] = adcread(3); // get output signal
-
-  // output to filter
+  CSET1(cells, (int32_t)omem + 1, adcread(3)); // get output signal
   (*filtermod[qqq])((int)cells[omem]);
-  return IP + insdir;
+  return (uint8_t)(IP + insdir);
 }
 
-/* plag - Plague Function Group
-   instructions for plague CPUs! */
+/* ---------------------------------------------------------------------- */
+/* Plague Function Group (Algorithmen)                                    */
+/* ---------------------------------------------------------------------- */
 
 /*
   Plaque Mutate changes cell values to values from Filter Output until cells[0] value is reached
 */
-void mutate(unsigned char *cells)
+void mutate(uint8_t *cells)
 {
-  unsigned char x, y;
+  uint8_t x, y;
   for (y = 0; y < cells[0]; y++)
   {
     x = adcread(3);         // Read output signal
-    cells[x] ^= (x & 0x0f); // copies the bit if it is set in one operand (but not both) 0b00001111
+    cells[x] ^= (x & 0x0f); // 0b00001111
   }
 }
+
 /*
   Plague Hodge Implementation
-  Switches every 110 Cycles the cells array with newcells array
-
+  - nutzt jetzt CELLS_LEN/2 (=128) als Halbraum
+  - sichere Grenzen (CoreCellx: 17..110)
+  - keine Floats / floor()
 */
-
-void hodge(unsigned char *cellies)
+void hodge(uint8_t *cellies)
 {
-  int sum = 0, numill = 0, numinf = 0; // max value 32767
-  unsigned char q, k1, k2, g;
-  static unsigned char CoreCellx = CELLLEN + 1;  // raises every time function is called
-  static unsigned char flag = 0;                 // Toggle Flag
-  static unsigned char *newcells, *cells, *swap; // Changed variables to static
+  int sum = 0, numill = 0, numinf = 0;
+  uint8_t q, k1, k2, g;
+  static uint8_t CoreCellx = CELLLEN + 1; // 17..110
+  static uint8_t flag = 0;                // Toggle Flag
+  static uint8_t *newcells, *cells, *swap;
 
-  // Swap where the cellies go
+  const uint16_t HALF = (CELLS_LEN / 2); // 128
+
+  // Swap wo die Daten liegen
   if ((flag & 0x01) == 0)
   {
     cells = cellies;
-    newcells = &cellies[MAX_SAM / 2];
+    newcells = &cellies[HALF];
   }
   else
   {
-    cells = &cellies[MAX_SAM / 2];
+    cells = &cellies[HALF];
     newcells = cellies;
   }
 
-  // Sets Reference Values
+  // Referenzen
   q = cells[0];
   k1 = cells[1];
-  k2 = cells[2];
-  g = cells[3];
   if (k1 == 0)
     k1 = 1;
+  k2 = cells[2];
   if (k2 == 0)
     k2 = 1;
+  g = cells[3];
 
-  // Calculate sum of 3 neighbor cells values
+  // Neighbors (CoreCellx in safe range 17..110)
   sum = cells[CoreCellx] + cells[CoreCellx - 1] + cells[CoreCellx + 1] + cells[CoreCellx - CELLLEN] + cells[CoreCellx + CELLLEN] + cells[CoreCellx - CELLLEN - 1] + cells[CoreCellx - CELLLEN + 1] + cells[CoreCellx + CELLLEN - 1] + cells[CoreCellx + CELLLEN + 1];
 
-  // Decide which one is infected or ill.
-  if (cells[CoreCellx - 1] == (q - 1))
-    numill++;
-  else if (cells[CoreCellx - 1] > 0)
-    numinf++;
-  if (cells[CoreCellx + 1] == (q - 1))
-    numill++;
-  else if (cells[CoreCellx + 1] > 0)
-    numinf++;
-  if (cells[CoreCellx - CELLLEN] == (q - 1))
-    numill++;
-  else if (cells[CoreCellx - CELLLEN] > 0)
-    numinf++;
-  if (cells[CoreCellx + CELLLEN] == (q - 1))
-    numill++;
-  else if (cells[CoreCellx + CELLLEN] > 0)
-    numinf++;
-  if (cells[CoreCellx - CELLLEN - 1] == q)
-    numill++;
-  else if (cells[CoreCellx - CELLLEN - 1] > 0)
-    numinf++;
-  if (cells[CoreCellx - CELLLEN + 1] == q)
-    numill++;
-  else if (cells[CoreCellx - CELLLEN + 1] > 0)
-    numinf++;
-  if (cells[CoreCellx + CELLLEN - 1] == q)
-    numill++;
-  else if (cells[CoreCellx + CELLLEN - 1] > 0)
-    numinf++;
-  if (cells[CoreCellx + CELLLEN + 1] == q)
-    numill++;
-  else if (cells[CoreCellx + CELLLEN + 1] > 0)
-    numinf++;
+  // Counters
+  numill = 0;
+  numinf = 0;
+  {
+    uint16_t idx = CoreCellx - 1;
+    if (cells[idx] == (uint8_t)(q - 1))
+      numill++;
+    else if (cells[idx] > 0)
+      numinf++;
+  }
+  {
+    uint16_t idx = CoreCellx + 1;
+    if (cells[idx] == (uint8_t)(q - 1))
+      numill++;
+    else if (cells[idx] > 0)
+      numinf++;
+  }
+  {
+    uint16_t idx = CoreCellx - CELLLEN;
+    if (cells[idx] == (uint8_t)(q - 1))
+      numill++;
+    else if (cells[idx] > 0)
+      numinf++;
+  }
+  {
+    uint16_t idx = CoreCellx + CELLLEN;
+    if (cells[idx] == (uint8_t)(q - 1))
+      numill++;
+    else if (cells[idx] > 0)
+      numinf++;
+  }
+  {
+    uint16_t idx = CoreCellx - CELLLEN - 1;
+    if (cells[idx] == q)
+      numill++;
+    else if (cells[idx] > 0)
+      numinf++;
+  }
+  {
+    uint16_t idx = CoreCellx - CELLLEN + 1;
+    if (cells[idx] == q)
+      numill++;
+    else if (cells[idx] > 0)
+      numinf++;
+  }
+  {
+    uint16_t idx = CoreCellx + CELLLEN - 1;
+    if (cells[idx] == q)
+      numill++;
+    else if (cells[idx] > 0)
+      numinf++;
+  }
+  {
+    uint16_t idx = CoreCellx + CELLLEN + 1;
+    if (cells[idx] == q)
+      numill++;
+    else if (cells[idx] > 0)
+      numinf++;
+  }
 
-  // Sets the Values of Cells[0-127]
+  // Integer arithmetic (equivalent to floor for >=0)
   if (cells[CoreCellx] == 0)
-    // there is a slight chance cell value will raise up to 2
-    // sets the lowest integral number -maximal value is 2 = 1(numinf/k1) + 1 (numill/k2)
-    newcells[CoreCellx % 128] = floor(numinf / k1) + floor(numill / k2);
-  else if (cells[CoreCellx] < q - 1) // if cells[CoreCellx]<cells[0]+1
-
-    newcells[CoreCellx % 128] = floor(sum / (numinf + 1)) + g;
+    newcells[CoreCellx] = (uint8_t)((numinf / k1) + (numill / k2));
+  else if (cells[CoreCellx] < (uint8_t)(q - 1))
+    newcells[CoreCellx] = (uint8_t)((sum / (numinf + 1)) + g);
   else
-    newcells[CoreCellx % 128] = 0;
+    newcells[CoreCellx] = 0;
 
-  if (newcells[CoreCellx % 128] > q - 1)
-    newcells[CoreCellx % 128] = q - 1;
+  if (newcells[CoreCellx] > (uint8_t)(q - 1))
+    newcells[CoreCellx] = (uint8_t)(q - 1);
 
-  CoreCellx++; // next time take the next cell
-
-  // if CoreCellx reaches 110, reset CoreCellx, swap cells and newcells;
-  if (CoreCellx > ((MAX_SAM / 2) - CELLLEN - 1))
+  CoreCellx++;
+  const uint8_t CORE_MAX = (uint8_t)(HALF - CELLLEN - 2); // 128-16-2 = 110
+  if (CoreCellx > CORE_MAX)
   {
     CoreCellx = CELLLEN + 1;
-    //    swap = cells; cells = newcells; newcells = swap;
     swap = cells;
     cells = newcells;
     newcells = swap;
-
-    flag ^= 0x01; // Toggle Flag
+    flag ^= 0x01; // Toggle
   }
 }
+
 /*
   Plague Cel Algorithm
-  Changes up to 16 Cells to 0 or 255
 */
-void cel(unsigned char *cells)
+void cel(uint8_t *cells)
 {
-
-  static unsigned char l = 0;
-  unsigned char cell, state, res;
-  unsigned char rule = cells[0];
+  static uint8_t l = 0;
+  uint8_t cell, state, res;
+  uint8_t rule = cells[0];
   res = 0;
   l++;
   l %= CELLLEN;
@@ -1117,7 +1166,7 @@ void cel(unsigned char *cells)
 
     if ((rule >> state) & 1)
     {
-      res += 1; // Todo:Warum wird res benutzt?
+      res += 1;
       cells[cell + (((l + 1) % CELLLEN) * CELLLEN)] = 255;
     }
     else
@@ -1129,29 +1178,31 @@ void cel(unsigned char *cells)
 
 /*
   Plague SIR Algorithm
-  Sets value of cells to recovered(129), susceptible(0) or 1
+  → Halbraum nun CELLS_LEN/2 (=128)
 */
-void SIR(unsigned char *cellies)
+void SIR(uint8_t *cellies)
 {
-  unsigned char cell, x = 0;
-  static unsigned char flag = 0; // Toggle Flag
-  unsigned char *newcells, *cells;
-  unsigned char kk = cellies[0], p = cellies[1];
+  uint16_t x = 0;
+  static uint8_t flag = 0; // Toggle Flag
+  uint8_t *newcells, *cells;
+  uint8_t kk = cellies[0], p = cellies[1];
+
+  const uint16_t HALF = (CELLS_LEN / 2); // 128
 
   if ((flag & 0x01) == 0)
   {
     cells = cellies;
-    newcells = &cellies[MAX_SAM / 2];
+    newcells = &cellies[HALF];
   }
   else
   {
-    cells = &cellies[MAX_SAM / 2];
+    cells = &cellies[HALF];
     newcells = cellies;
   }
 
-  for (x = CELLLEN; x < ((MAX_SAM / 2) - CELLLEN); x++)
+  for (x = CELLLEN; x < (HALF - CELLLEN); x++)
   {
-    cell = cells[x];
+    uint8_t cell = cells[x];
     newcells[x] = cell;
     if (cell >= kk)
       newcells[x] = recovered;
@@ -1161,201 +1212,222 @@ void SIR(unsigned char *cellies)
     }
     else if (cell == susceptible)
     {
-
       if ((cells[x - CELLLEN] > 0 && cells[x - CELLLEN] < kk) ||
           (cells[x + CELLLEN] > 0 && cells[x + CELLLEN] < kk) ||
           (cells[x - 1] > 0 && cells[x - 1] < kk) ||
           (cells[x + 1] > 0 && cells[x + 1] < kk))
       {
-        if (rand() % 10 < p)
+        if ((prng8() % 10) < p)
           newcells[x] = 1;
       }
     }
   }
   flag ^= 0x01;
 }
+
 /*
   Plague Life Algorithm
+  → Halbraum nun CELLS_LEN/2 (=128)
 */
-void life(unsigned char *cellies)
+void life(uint8_t *cellies)
 {
-  unsigned char x, sum;
+  uint16_t x;
+  uint8_t sum;
+  static uint8_t flag = 0;
+  uint8_t *newcells, *cells;
 
-  static unsigned char flag = 0;
-  unsigned char *newcells, *cells;
+  const uint16_t HALF = (CELLS_LEN / 2); // 128
 
   if ((flag & 0x01) == 0)
   {
     cells = cellies;
-    newcells = &cellies[MAX_SAM / 2];
+    newcells = &cellies[HALF];
   }
   else
   {
-    cells = &cellies[MAX_SAM / 2];
+    cells = &cellies[HALF];
     newcells = cellies;
   }
 
-  for (x = CELLLEN + 1; x < ((MAX_SAM / 2) - CELLLEN - 1); x++)
+  for (x = CELLLEN + 1; x < (HALF - CELLLEN - 1); x++)
   {
-    sum = cells[x] % 2 + cells[x - 1] % 2 + cells[x + 1] % 2 + cells[x - CELLLEN] % 2 + cells[x + CELLLEN] % 2 + cells[x - CELLLEN - 1] % 2 + cells[x - CELLLEN + 1] % 2 + cells[x + CELLLEN - 1] % 2 + cells[x + CELLLEN + 1] % 2;
-    sum = sum - cells[x] % 2;
-    if (sum == 3 || (sum + (cells[x] % 2) == 3))
+    sum = cells[x] % 2 + cells[x - 1] % 2 + cells[x + 1] % 2 +
+          cells[x - CELLLEN] % 2 + cells[x + CELLLEN] % 2 +
+          cells[x - CELLLEN - 1] % 2 + cells[x - CELLLEN + 1] % 2 +
+          cells[x + CELLLEN - 1] % 2 + cells[x + CELLLEN + 1] % 2;
+    sum = (uint8_t)(sum - (cells[x] % 2));
+    if (sum == 3 || (uint8_t)(sum + (cells[x] % 2)) == 3)
       newcells[x] = 255;
     else
       newcells[x] = 0;
   }
 
-  // swapping
   flag ^= 0x01;
 }
 
+/* Seed für PRNG (LFSR) aus ADC-Rauschen */
 void seed_rng(void)
 {
-  uint16_t seed = 0;
+  uint8_t seed = 0;
   for (int i = 0; i < 16; i++)
   {
-    seed = (seed << 1) ^ adcread(3);
+    seed ^= adcread(3);
     _delay_us(50);
   }
-  srand(seed);
+  if (seed == 0)
+    seed = 0xA5; // Fallback
+  lfsr ^= seed;
 }
+
+/* --------------------------------------------------------------------------
+   ADC-Cache (polling, throttled)
+   -------------------------------------------------------------------------- */
+typedef struct
+{
+  uint8_t ch0, ch1, ch2, ch3;
+} AdcSnapshot;
+static AdcSnapshot g_adc;       // Current values
+static uint16_t g_adc_tick = 0; // Clock for throttling
+
+// Update all potentiometers every 16 iterations
+static inline void adc_poll_throttled(void)
+{
+  if ((g_adc_tick++ & 0x0F) == 0)
+  {
+    g_adc.ch0 = adcread(0);
+    g_adc.ch1 = adcread(1);
+    g_adc.ch2 = adcread(2);
+    g_adc.ch3 = adcread(3);
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+/* main                                                                   */
+/* ---------------------------------------------------------------------- */
 
 int main(void)
 {
-
   seed_rng();
 
-  unsigned char *cells = xxx;
+  uint8_t *cells = cells_buf;
 
   // CPU Functions // Instruction Groups
-  unsigned char (*instructionsetfirst[])(unsigned char *cells, unsigned char IP) = {outff, outpp, finc, fdec, fincm, fdecm, fin1, fin2, fin3, fin4, outf, outp, plus, minus, bitshift1, bitshift2, bitshift3, branch, jump, infect, store, writeknob, writesamp, skip, direction, die}; // 26 instructions
+  uint8_t (*instructionsetfirst[])(uint8_t *cells, uint8_t IP) =
+      {outff, outpp, finc, fdec, fincm, fdecm, fin1, fin2, fin3, fin4, outf, outp, plus, minus, bitshift1, bitshift2, bitshift3, branch, jump, infect, store, writeknob, writesamp, skip, direction, die}; // 26
 
-  unsigned char (*instructionsetplague[])(unsigned char *cells, unsigned char IP) = {writeknob, writesamp, ploutf, ploutp, plenclose, plinfect, pldie, plwalk}; // 8
+  uint8_t (*instructionsetplague[])(uint8_t *cells, uint8_t IP) =
+      {writeknob, writesamp, ploutf, ploutp, plenclose, plinfect, pldie, plwalk}; // 8
 
-  unsigned char (*instructionsetbf[])(unsigned char *cells, unsigned char IP) = {bfinc, bfdec, bfincm, bfdecm, bfoutf, bfoutp, bfin, bfbrac1, bfbrac2}; // 9
+  uint8_t (*instructionsetbf[])(uint8_t *cells, uint8_t IP) =
+      {bfinc, bfdec, bfincm, bfdecm, bfoutf, bfoutp, bfin, bfbrac1, bfbrac2}; // 9
 
-  unsigned char (*instructionsetSIR[])(unsigned char *cells, unsigned char IP) = {SIRoutf, SIRoutp, SIRincif, SIRdieif, SIRrecif, SIRinfif}; // 6
+  uint8_t (*instructionsetSIR[])(uint8_t *cells, uint8_t IP) =
+      {SIRoutf, SIRoutp, SIRincif, SIRdieif, SIRrecif, SIRinfif}; // 6
 
-  unsigned char (*instructionsetredcode[])(unsigned char *cells, unsigned char IP) = {rdmov, rdadd, rdsub, rdjmp, rdjmz, rdjmg, rddjz, rddat, rdcmp, rdoutf, rdoutp}; // 11
+  uint8_t (*instructionsetredcode[])(uint8_t *cells, uint8_t IP) =
+      {rdmov, rdadd, rdsub, rdjmp, rdjmz, rdjmg, rddjz, rddat, rdcmp, rdoutf, rdoutp}; // 11
 
-  unsigned char (*instructionsetbiota[])(unsigned char *cells, unsigned char IP) = {btempty, btoutf, btoutp, btstraight, btbackup, btturn, btunturn, btg, btclear, btdup}; // 10
+  uint8_t (*instructionsetbiota[])(uint8_t *cells, uint8_t IP) =
+      {btempty, btoutf, btoutp, btstraight, btbackup, btturn, btunturn, btg, btclear, btdup}; // 10
 
-  unsigned char (*instructionsetreddeath[])(unsigned char *cells, unsigned char IP) = {redplague, reddeath, redclock, redrooms, redunmask, redprospero, redoutside}; // 7
+  uint8_t (*instructionsetreddeath[])(uint8_t *cells, uint8_t IP) =
+      {redplague, reddeath, redclock, redrooms, redunmask, redprospero, redoutside}; // 7
 
   // Plague Function Group
-  void (*plag[])(unsigned char *cells) = {mutate, SIR, hodge, cel, hodge, SIR, life, mutate};
+  void (*plag[])(uint8_t *cells) = {mutate, SIR, hodge, cel, hodge, SIR, life, mutate};
 
-  adc_init(); // Initialize Analog Digital Converter
-
-  initcell(cells); // Initialize Array of Cells for Sound Storage
+  adc_init();      // Initialize ADC
+  initcell(cells); // Initialize Array of Cells for Sound Storage (jetzt 256 Zellen)
 
   sbi(DDRD, PORTD0); // PinD0 as out -> Switch1 -> IC40106(OSC) to filter
   sbi(DDRD, PORTD1); // PinD1 as out -> Switch2 -> pwm to filter  (PinD6 to Filter)
   sbi(DDRD, PORTD2); // PinD2 as out -> Switch3 -> Feedback on/off
-  sbi(DDRD, PORTD6); // PinD6 as out -> Audio Signal Output > immer wenn OCR0A gleich TCNT0 ist
+  sbi(DDRD, PORTD6); // PinD6 as out -> Audio Signal Output
   sbi(DDRB, PORTB1); // Set Filter Clock via OCR1A
 
   // Set Timer
   TCCR1A = (1 << COM1A0);              // Toggle OCR1A/OCR1B on Compare Match
-  TCCR1B = (1 << WGM12) | (1 << CS11); // Sets WaveGenerationMode to "clear timer on compare match" Top is OCR1A // Clock Select prescaler /8
+  TCCR1B = (1 << WGM12) | (1 << CS11); // CTC, /8
 
-  // Configure Audio Output
-  // TCCR0A Sets WaveGernationMode to Fast PWM TOP is OCRA
+  // Audio Output (maintain; check hardware if COM0A0 is correct)
   TCCR0A = (1 << COM0A0) | (1 << WGM01) | (1 << WGM00); // Toggle OC0A on Compare Match // Fast PWM
-  TCCR0B |= (1 << CS00) | (1 << CS02) | (1 << WGM02);   // Clock Select prescaler /1024 // WGM02=1 >> Fast PWM
+  TCCR0B |= (1 << CS00) | (1 << CS02) | (1 << WGM02);   // prescaler /1024 // WGM02=1 >> Fast PWM
 
   cbi(PORTD, PORTD0); // IC40106 not to filter
   sbi(PORTD, PORTD1); // pwm to filter
   cbi(PORTD, PORTD2); // no feedback
 
-  instructionp = 0; // InstructionPointer selects cell value is used for the next instruction select
-  insdir = 1;       // Step size for instruction Pointer - only changes in plwalk()
-  dir = 1;          // Direction for the next step
+  instructionp = 0; // InstructionPointer
+  insdir = 1;       // Step size
+  dir = 1;          // Direction
   btdir = 0;
   dcdir = 0;
 
   while (1)
   {
-
-    IP = adcread(0);       // read Poti 1 top    /  left of panel mount jack
-    hardware = adcread(1); // read Poti 2 middle /   top of panel mount jack
-    controls = adcread(2); // read Poti 3 buttom / right of panel mount jack
+    // --- ADC-Cache ---
+    adc_poll_throttled();
+    IP = g_adc.ch0;       // Poti 1
+    hardware = g_adc.ch1; // Poti 2
+    controls = g_adc.ch2; // Poti 3
 
     if (hardware == 0)
       hardware = instructionp;
     if (controls == 0)
       controls = instructionp;
 
-    qqq = controls % 4; // Sets the filtertyp in filtermod()
-
-    cpu = IP >> 5;              // 8 CPUs  // cpu sets 1 of 8 instruction groups/algorithm
-    step = (controls % 32) + 1; // sets step to 1-32 // decided than a new plague will be created
-
-    plague = controls >> 5; // Sets plague Function
+    qqq = controls % 4;         // Filtertyp
+    cpu = IP >> 5;              // 8 CPUs
+    step = (controls % 32) + 1; // 1-32
+    plague = controls >> 5;
 
     count++;
 
     // every 1-32 steps run an algorithm
     if (count % ((IP % 32) + 1) == 0)
     {
-
-      // Which instruction group/algorithm is used?
       switch (cpu)
       {
       case 0:
-        //
         instruction = cells[instructionp];
-        instructionp = (*instructionsetfirst[instruction % 26])(cells, instructionp); // mistake before as was instruction%INSTLEN in last instance
-        //      insdir=dir*(IP%16)+1; // prev mistake as just got exponentially larger
-        insdir = dir; // set direction for next instruction
+        instructionp = (*instructionsetfirst[instruction % 26])(cells, instructionp);
+        insdir = dir;
         break;
       case 1:
-        // Plague Alogrithms
         instruction = cells[instructionp];
         instructionp = (*instructionsetplague[instruction % 8])(cells, instructionp);
-        //	    insdir=dir*(IP%16)+1;
         insdir = dir;
         if (cells[instructionp] == 255 && dir < 0)
           dir = 1;
         else if (cells[instructionp] == 255 && dir > 0)
-          dir = -1; // barrier
+          dir = -1;
         break;
       case 2:
-        // Brain Fuck Algorithms
         instruction = cells[instructionp];
         instructionp = (*instructionsetbf[instruction % 9])(cells, instructionp);
-        //	    insdir=dir*(IP%16)+1;
         insdir = dir;
         break;
       case 3:
-        // SIR (susceptible, infected, recovered) Algorithms
         instruction = cells[instructionp];
         instructionp = (*instructionsetSIR[instruction % 6])(cells, instructionp);
-        //	    insdir=dir*(IP%16)+1;
         insdir = dir;
         break;
       case 4:
-        // Red Code Algorithms
         instruction = cells[instructionp];
         instructionp = (*instructionsetredcode[instruction % 11])(cells, instructionp);
-        //	    insdir=dir*(IP%16)+1;
         insdir = dir;
         break;
       case 5:
-        // direct output
         instruction = cells[instructionp];
         OCR0A = instruction;
-        instructionp += dir; // changed from insdir
+        instructionp += dir; // intentional wrap
         break;
       case 6:
-        // Red Death Algorithms
         instruction = cells[instructionp];
         instructionp = (*instructionsetreddeath[instruction % 7])(cells, instructionp);
-        //	    insdir=dir*(IP%16)+1;
         insdir = dir;
         break;
       case 7:
-        // la biota Algorithms
         instruction = cells[instructionp];
         instructionp = (*instructionsetbiota[instruction % 10])(cells, instructionp);
         if (btdir == 0)
@@ -1374,138 +1446,149 @@ int main(void)
         insdir_modified = false;
     }
 
-    // Is is time for a new plaque?
+    // Is it time for a new plaque?
     if (count % step == 0)
-    { // was instructionp%step
+    {
       (*plag[plague])(cells);
     }
 
-    // Filter or Feedback required?
+    // Hardware Routing (atomar)
     hardk = hardware % 8;
-
     switch (hardk)
     {
     case 0:
-      cbi(PORTD, PORTD2); // no feedback
+      ATOMIC_BLOCK(ATOMIC_RESTORESTATE) { cbi(PORTD, PORTD2); } // no feedback
       break;
     case 1:
-      cli();                  // Disable interrupts
-      PORTD |= (1 << PORTD2); // feedback
-      sei();                  // Enable interrupts
+      ATOMIC_BLOCK(ATOMIC_RESTORESTATE) { PORTD |= (1 << PORTD2); } // feedback
       break;
     case 2:
-      sbi(PORTD, PORTD0); // IC40106 to filter
-      cbi(PORTD, PORTD1); // pwm to filter = NO!
+      ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
+      {
+        sbi(PORTD, PORTD0); // IC40106 to filter
+        cbi(PORTD, PORTD1); // pwm to filter = NO!
+      }
       break;
     case 3:
-      cbi(PORTD, PORTD0); // not IC40106 to filter
-      sbi(PORTD, PORTD1); // pwm to filter
+      ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
+      {
+        cbi(PORTD, PORTD0); // not IC40106 to filter
+        sbi(PORTD, PORTD1); // pwm to filter
+      }
       break;
     case 4:
-      // All to filter with feedback
-      PORTD |= (1 << PORTD0) | (1 << PORTD1) | (1 << PORTD2);
-      // PORTD|=instructionp&0x07;
+      ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
+      {
+        PORTD |= (1 << PORTD0) | (1 << PORTD1) | (1 << PORTD2);
+      }
       break;
     case 5:
-      if ((instructionp & 0x01) == 0x01)
-      {                     // Toggle feedback through instructionp
-        cbi(PORTD, PORTD2); // no feedback
-      }
-      else
+      ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
       {
-        sbi(PORTD, PORTD2); // feedback
+        if ((instructionp & 0x01) == 0x01)
+        {
+          cbi(PORTD, PORTD2);
+        } // no feedback
+        else
+        {
+          sbi(PORTD, PORTD2);
+        } // feedback
       }
       break;
     case 6:
-      // Activate IC40106 and PWM to filter
-      PORTD |= (1 << PORTD0) | (1 << PORTD1);
+      ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
+      {
+        PORTD |= (1 << PORTD0) | (1 << PORTD1); // IC40106 + PWM to filter
+      }
       break;
     case 7:
-      // Toggle Routing to Filter and Feedback
-      PORTD ^= (1 << PORTD0) | (1 << PORTD1) | (1 << PORTD2);
-      // PORTD^=instructionp&0x07;
+      ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
+      {
+        PORTD ^= (1 << PORTD0) | (1 << PORTD1) | (1 << PORTD2); // Toggle routing
+      }
+      break;
     }
 
     // Filter Configuration
     fhk = hardware >> 4;
-
     switch (fhk)
     {
     case 0:
       cbi(DDRB, PORTB1); // filter off
       break;
     case 1:
-      sbi(DDRB, PORTB1);                   // Filter on
+      sbi(DDRB, PORTB1);
       TCCR1B = (1 << WGM12) | (1 << CS10); // no divider
       filterk = 8;
       break;
     case 2:
-      sbi(DDRB, PORTB1);                   // Filter on
+      sbi(DDRB, PORTB1);
       TCCR1B = (1 << WGM12) | (1 << CS10); // no divider
       filterk = 4;
       break;
     case 3:
-      sbi(DDRB, PORTB1);                   // Filter on
+      sbi(DDRB, PORTB1);
       TCCR1B = (1 << WGM12) | (1 << CS10); // no divider
       filterk = 2;
       break;
     case 4:
-      sbi(DDRB, PORTB1);                   // Filter on
+      sbi(DDRB, PORTB1);
       TCCR1B = (1 << WGM12) | (1 << CS10); // no divider
       break;
     case 5:
-      sbi(DDRB, PORTB1);                   // Filter on
-      TCCR1B = (1 << WGM12) | (1 << CS11); // divide by 8
+      sbi(DDRB, PORTB1);
+      TCCR1B = (1 << WGM12) | (1 << CS11); // /8
       filterk = 8;
       break;
     case 6:
-      sbi(DDRB, PORTB1);                   // Filter on
-      TCCR1B = (1 << WGM12) | (1 << CS11); // divide by 8
+      sbi(DDRB, PORTB1);
+      TCCR1B = (1 << WGM12) | (1 << CS11); // /8
       filterk = 4;
       break;
     case 7:
-      sbi(DDRB, PORTB1);                   // Filter on
-      TCCR1B = (1 << WGM12) | (1 << CS11); // divide by 8
+      sbi(DDRB, PORTB1);
+      TCCR1B = (1 << WGM12) | (1 << CS11); // /8
       filterk = 2;
       break;
     case 8:
-      sbi(DDRB, PORTB1);                   // Filter on
-      TCCR1B = (1 << WGM12) | (1 << CS11); // divide by 8
+      sbi(DDRB, PORTB1);
+      TCCR1B = (1 << WGM12) | (1 << CS11); // /8
       break;
     case 9:
-      sbi(DDRB, PORTB1);                                 // Filter on
-      TCCR1B = (1 << WGM12) | (1 << CS11) | (1 << CS10); // divide by 64
+      sbi(DDRB, PORTB1);
+      TCCR1B = (1 << WGM12) | (1 << CS11) | (1 << CS10); // /64
       filterk = 8;
       break;
     case 10:
-      sbi(DDRB, PORTB1);                                 // Filter on
-      TCCR1B = (1 << WGM12) | (1 << CS11) | (1 << CS10); // divide by 64
+      sbi(DDRB, PORTB1);
+      TCCR1B = (1 << WGM12) | (1 << CS11) | (1 << CS10); // /64
       filterk = 4;
       break;
     case 11:
-      sbi(DDRB, PORTB1);                                 // Filter on
-      TCCR1B = (1 << WGM12) | (1 << CS11) | (1 << CS10); // divide by 64
+      sbi(DDRB, PORTB1);
+      TCCR1B = (1 << WGM12) | (1 << CS11) | (1 << CS10); // /64
       filterk = 2;
       break;
     case 12:
-      sbi(DDRB, PORTB1);                                 // Filter on
-      TCCR1B = (1 << WGM12) | (1 << CS11) | (1 << CS10); // divide by 64
+      sbi(DDRB, PORTB1);
+      TCCR1B = (1 << WGM12) | (1 << CS11) | (1 << CS10); // /64
       break;
     case 13:
-      sbi(DDRB, PORTB1);                   // Filter on
+      sbi(DDRB, PORTB1);
       TCCR1B = (1 << WGM12) | (1 << CS12); // 256
       filterk = 8;
       break;
     case 14:
-      sbi(DDRB, PORTB1);                   // Filter on
+      sbi(DDRB, PORTB1);
       TCCR1B = (1 << WGM12) | (1 << CS12); // 256
       filterk = 6;
       break;
     case 15:
-      sbi(DDRB, PORTB1);                   // Filter on
+      sbi(DDRB, PORTB1);
       TCCR1B = (1 << WGM12) | (1 << CS12); // 256
       filterk = 4;
     }
   }
   return 0;
+}
 }
