@@ -10,6 +10,9 @@ modulation using a **MAX7400-like filter**.\
 It reads ADC inputs (pots/samples), writes PWM/output values, and offers
 various "Plague" algorithms for sound generation.
 
+The sounds are the same as from the original micro blackdeath, but they are more controlable.
+I removed the chaotic selection of instructions, filter etc and make it more playable by slowly nudging the knobs.
+
 ## Important Files
 
 -   **`microbdinterp.c`** --- Main firmware source (ADC, instruction
