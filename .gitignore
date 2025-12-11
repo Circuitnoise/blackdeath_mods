@@ -1,1 +1,11 @@
+# Ignore VS Code configuration directory
 .vscode/
+
+# Ignore build artifacts
+*.o
+*.out
+*.hex
+
+# Ignore temporary or intermediate files
+*.tmp
+*.log
