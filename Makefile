@@ -22,10 +22,15 @@ FUSEL = 0xf7
 all: microbdinterp.hex
 #-------------------
 help: 
-	@echo "Usage: make all|load|load_pre|rdfuses|wrfuse1mhz|wrfuse4mhz|wrfusecrystal"
-	@echo "Warning: you will not be able to undo wrfusecrystal unless you connect an"
-	@echo "         external crystal! uC is dead after wrfusecrystal if you do not"
-	@echo "         have an external crystal."
+	@echo "Usage: make all|flash|read_firmware|rdfuses|fuse|clean"
+	@echo ""
+	@echo "Targets:"
+	@echo "  all           - Build hexfile from source"
+	@echo "  flash         - Flash hexfile to ATmega168"
+	@echo "  read_firmware - Download firmware from ATmega168 to backup.hex"
+	@echo "  rdfuses       - Read fuse bytes from ATmega168"
+	@echo "  fuse          - Write default fuse bytes"
+	@echo "  clean         - Remove build artifacts"
 #-------------------
 microbdinterp.hex : microbdinterp.out 
 	$(OBJCOPY) -R .eeprom -O ihex microbdinterp.out microbdinterp.hex 
@@ -50,6 +55,13 @@ fuse:
 flash: all
 	$(AVRDUDE) -F -U flash:w:microbdinterp.hex:i
 
+read_firmware:
+	@echo "Reading firmware from ATmega168..."
+	$(AVRDUDE) -U flash:r:backup.hex:i
+	@echo "Firmware saved to backup.hex"
+
+rdfuses:
+	$(AVRDUDE) -U lfuse:r:-:b -U hfuse:r:-:b
 
 
 #-------------------

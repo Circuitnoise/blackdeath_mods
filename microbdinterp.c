@@ -278,18 +278,21 @@ unsigned char jump(unsigned char *cells, unsigned char IP)
 {
 	if (cells[(IP + 1)] < 128)
 		return IP + cells[(IP + 1)];
-	else
-		return IP + insdir;
-}
-
-unsigned char infect(unsigned char *cells, unsigned char IP)
-{
-	int x = IP - 1;
-	if (x < 0)
-		x = MAX_SAM;
-	if (cells[x] < 128)
-		cells[(IP + 1)] = cells[IP];
-	return IP + insdir;
+	/*
+		Plaque Mutate changes cell values to values from Filter Output until cells[0] value is reached
+	*/
+	void mutate(unsigned char *cells)
+	{
+		unsigned char x, y;
+		unsigned int maxy = cells[0];
+		if (maxy > (ARRAY_SIZE - 1))
+			maxy = (ARRAY_SIZE - 1); // cap iterations to array size -1
+		for (y = 0; y < maxy; y++)
+		{
+			x = adcread(3);					  // Read output signal
+			cells[SAFE_IDX(x)] ^= (x & 0x0f); // safe index
+		}
+	}
 }
 
 unsigned char store(unsigned char *cells, unsigned char IP)
@@ -344,7 +347,7 @@ unsigned char ploutf(unsigned char *cells, unsigned char IP)
 
 unsigned char ploutp(unsigned char *cells, unsigned char IP)
 {
-	OCR0A = cells[IP + 1] + cells[IP - 1];
+	OCR0A = cells[SAFE_IDX(IP + 1)] + cells[SAFE_IDX(IP - 1)];
 	return IP + insdir;
 }
 
@@ -360,16 +363,16 @@ unsigned char plinfect(unsigned char *cells, unsigned char IP)
 
 	if (cells[IP] < 128)
 	{
-		cells[IP + 1] = cells[IP];
-		cells[IP - 1] = cells[IP];
+		cells[SAFE_IDX(IP + 1)] = cells[SAFE_IDX(IP)];
+		cells[SAFE_IDX(IP - 1)] = cells[SAFE_IDX(IP)];
 	}
 	return IP + insdir;
 }
 
 unsigned char pldie(unsigned char *cells, unsigned char IP)
 {
-	cells[IP - 1] = 0;
-	cells[IP + 1] = 0;
+	cells[SAFE_IDX(IP - 1)] = 0;
+	cells[SAFE_IDX(IP + 1)] = 0;
 	return IP + insdir;
 }
 
@@ -902,7 +905,7 @@ unsigned char redoutside(unsigned char *cells, unsigned char IP)
 
 /*
 	Plaque Mutate changes cell values to values from Filter Output until cells[0] value is reached
-*/
+	cells[SAFE_IDX(omem + 1)] = adcread(3); // get output signal (safe index)
 void mutate(unsigned char *cells)
 {
 	unsigned char x, y;
@@ -916,8 +919,8 @@ void mutate(unsigned char *cells)
 	Plague Hodge Implementation
 	Switches every 110 Cycles the cells array with newcells array
 
-*/
-
+		x = adcread(3);            // Read output signal
+		cells[SAFE_IDX(x)] ^= (x & 0x0f); // safe index
 void hodge(unsigned char *cellies)
 {
 	int sum = 0, numill = 0, numinf = 0; // max value 32767
