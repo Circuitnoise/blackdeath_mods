@@ -81,9 +81,9 @@ make fuse       # writes HFUSE/LFUSE as defined in the Makefile (use with care!)
 ```
   Control      Function
   ------------ -----------------------------------------------------
-  **Left**     CPU step / instruction-set selection
-  **Center**   Hardware / filter parameters
-  **Right**    Plague step / process selection and filter modifier
+  Left         CPU step / instruction-set selection
+  Center       Hardware / filter parameters
+  Right        Plague step / process selection and filter modifier
 ```
 
 ## Key Concepts in the Code
