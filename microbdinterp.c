@@ -639,13 +639,13 @@ unsigned char btoutp(unsigned char *cells, unsigned char IP)
 unsigned char btstraight(unsigned char *cells, unsigned char IP)
 {
 	if (dcdir == 0)
-		omem += 1;
+		omem = SAFE_IDX(omem + 1);
 	else if (dcdir == 1)
-		omem -= 1;
+		omem = SAFE_IDX(omem - 1);
 	else if (dcdir == 2)
-		omem += 16;
+		omem = SAFE_IDX(omem + 16);
 	else if (dcdir == 3)
-		omem -= 16;
+		omem = SAFE_IDX(omem - 16);
 
 	if (cells[omem] == 0)
 	{ // change dir
@@ -664,13 +664,13 @@ unsigned char btstraight(unsigned char *cells, unsigned char IP)
 unsigned char btbackup(unsigned char *cells, unsigned char IP)
 {
 	if (dcdir == 0)
-		omem -= 1;
+		omem = SAFE_IDX(omem - 1);
 	else if (dcdir == 1)
-		omem += 1;
+		omem = SAFE_IDX(omem + 1);
 	else if (dcdir == 2)
-		omem -= 16;
+		omem = SAFE_IDX(omem - 16);
 	else if (dcdir == 3)
-		omem += 16;
+		omem = SAFE_IDX(omem + 16);
 	if (cells[omem] == 0)
 	{
 		if (btdir == 0)
@@ -688,42 +688,43 @@ unsigned char btbackup(unsigned char *cells, unsigned char IP)
 unsigned char btturn(unsigned char *cells, unsigned char IP)
 {
 	if (dcdir == 0)
-		omem += 16;
+		omem = SAFE_IDX(omem + 16);
 	else if (dcdir == 1)
-		omem -= 16;
+		omem = SAFE_IDX(omem - 16);
 	else if (dcdir == 2)
-		omem += 1;
+		omem = SAFE_IDX(omem + 1);
 	else if (dcdir == 3)
-		omem -= 1;
+		omem = SAFE_IDX(omem - 1);
 	return IP;
 }
 
 unsigned char btunturn(unsigned char *cells, unsigned char IP)
 {
 	if (dcdir == 0)
-		omem -= 16;
+		omem = SAFE_IDX(omem - 16);
 	else if (dcdir == 1)
-		omem += 16;
+		omem = SAFE_IDX(omem + 16);
 	else if (dcdir == 2)
-		omem -= 1;
+		omem = SAFE_IDX(omem - 1);
 	else if (dcdir == 3)
-		omem += 1;
+		omem = SAFE_IDX(omem + 1);
 	return IP;
 }
 
 unsigned char btg(unsigned char *cells, unsigned char IP)
 {
 	unsigned char x = 0;
+	// Safe loop with omem bounds checking to prevent wrap-around and infinite loops
 	while (x < 20 && cells[omem] != 0)
 	{
 		if (dcdir == 0)
-			omem += 1;
+			omem = SAFE_IDX(omem + 1);
 		else if (dcdir == 1)
-			omem -= 1;
+			omem = SAFE_IDX(omem - 1);
 		else if (dcdir == 2)
-			omem += 16;
+			omem = SAFE_IDX(omem + 16);
 		else if (dcdir == 3)
-			omem -= 16;
+			omem = SAFE_IDX(omem - 16);
 		x++;
 	}
 	return IP;
