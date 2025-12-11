@@ -273,26 +273,12 @@ unsigned char branch(unsigned char *cells, unsigned char IP)
 		IP = cells[omem];
 	return IP + insdir;
 }
-
-unsigned char jump(unsigned char *cells, unsigned char IP)
+for (y = 0; y < maxy; y++)
 {
-	if (cells[(IP + 1)] < 128)
-		return IP + cells[(IP + 1)];
-	/*
-		Plaque Mutate changes cell values to values from Filter Output until cells[0] value is reached
-	*/
-	void mutate(unsigned char *cells)
-	{
-		unsigned char x, y;
-		unsigned int maxy = cells[0];
-		if (maxy > (ARRAY_SIZE - 1))
-			maxy = (ARRAY_SIZE - 1); // cap iterations to array size -1
-		for (y = 0; y < maxy; y++)
-		{
-			x = adcread(3);					  // Read output signal
-			cells[SAFE_IDX(x)] ^= (x & 0x0f); // safe index
-		}
-	}
+	x = adcread(3);					  // Read output signal
+	cells[SAFE_IDX(x)] ^= (x & 0x0f); // safe index
+}
+}
 }
 
 unsigned char store(unsigned char *cells, unsigned char IP)
