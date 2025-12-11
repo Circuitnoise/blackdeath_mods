@@ -21,6 +21,7 @@ various "Plague" algorithms for sound generation.
 
 If you use a `usbasp` programmer, connect the pins as follows:
 
+```
   Signal             Programmer Pins   Board Pin   10-Pin Adapter Cable
   ------------------ ----------------- ----------- ----------------------
   **GND**            4, 6, 8, 10       1           1--2
@@ -29,6 +30,7 @@ If you use a `usbasp` programmer, connect the pins as follows:
   **MOSI (PDI)**     1                 4           7--8
   **Reset**          5                 5           9--10
   **VCC (5V/3V3)**   2                 --          --
+````
 
 > **Note:** VCC is usually not supplied through the adapter cable unless
 > you explicitly want to power the target controller.\
