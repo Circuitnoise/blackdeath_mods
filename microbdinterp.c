@@ -57,6 +57,8 @@ TODO:
 #define high(port, pin) (port |= _BV(pin))
 #define PI 3.1415926535897932384626433832795
 #define BET(A, B, C) (((A >= B) && (A <= C)) ? 1 : 0) /* a between [b,c] */
+#define ARRAY_SIZE (MAX_SAM + 12)					  /* Safe array bounds */
+#define SAFE_IDX(idx) ((idx) % ARRAY_SIZE)			  /* Bounds check macro */
 #define NSTEPS 10000
 #define recovered 129
 #define dead 255
@@ -515,19 +517,23 @@ unsigned char SIRinfif(unsigned char *cells, unsigned char IP)
 
 unsigned char rdmov(unsigned char *cells, unsigned char IP)
 {
-	cells[(IP + cells[IP + 2])] = cells[(IP + cells[IP + 1])];
+	cells[SAFE_IDX(IP + cells[IP + 2])] = cells[SAFE_IDX(IP + cells[IP + 1])];
 	return IP += 3;
 }
 
 unsigned char rdadd(unsigned char *cells, unsigned char IP)
 {
-	cells[(IP + cells[IP + 2])] = cells[(IP + cells[IP + 2])] + cells[(IP + cells[IP + 1])];
+	unsigned char idx_dst = SAFE_IDX(IP + cells[IP + 2]);
+	unsigned char idx_src = SAFE_IDX(IP + cells[IP + 1]);
+	cells[idx_dst] = cells[idx_dst] + cells[idx_src];
 	return IP += 3;
 }
 
 unsigned char rdsub(unsigned char *cells, unsigned char IP)
 {
-	cells[(IP + cells[IP + 2])] = cells[(IP + cells[IP + 2])] - cells[(IP + cells[IP + 1])];
+	unsigned char idx_dst = SAFE_IDX(IP + cells[IP + 2]);
+	unsigned char idx_src = SAFE_IDX(IP + cells[IP + 1]);
+	cells[idx_dst] = cells[idx_dst] - cells[idx_src];
 	return IP += 3;
 }
 
@@ -539,7 +545,7 @@ unsigned char rdjmp(unsigned char *cells, unsigned char IP)
 
 unsigned char rdjmz(unsigned char *cells, unsigned char IP)
 {
-	if (cells[(IP + cells[IP + 2])] == 0)
+	if (cells[SAFE_IDX(IP + cells[IP + 2])] == 0)
 		IP = cells[IP + 1];
 	else
 		IP += 3;
@@ -548,7 +554,7 @@ unsigned char rdjmz(unsigned char *cells, unsigned char IP)
 
 unsigned char rdjmg(unsigned char *cells, unsigned char IP)
 {
-	if (cells[(IP + cells[IP + 2])] >= 0)
+	if (cells[SAFE_IDX(IP + cells[IP + 2])] >= 0)
 		IP = cells[IP + 1];
 	else
 		IP += 3;
@@ -558,7 +564,7 @@ unsigned char rdjmg(unsigned char *cells, unsigned char IP)
 unsigned char rddjz(unsigned char *cells, unsigned char IP)
 {
 	unsigned char x;
-	x = (IP + cells[IP + 2]);
+	x = SAFE_IDX(IP + cells[IP + 2]);
 	cells[x] = cells[x] - 1;
 	if (cells[x] == 0)
 		IP = cells[IP + 1];
@@ -575,7 +581,7 @@ unsigned char rddat(unsigned char *cells, unsigned char IP)
 
 unsigned char rdcmp(unsigned char *cells, unsigned char IP)
 {
-	if (cells[(IP + cells[IP + 2])] != cells[(IP + cells[IP + 1])])
+	if (cells[SAFE_IDX(IP + cells[IP + 2])] != cells[SAFE_IDX(IP + cells[IP + 1])])
 		IP += 6;
 	else
 		IP += 3;
@@ -585,7 +591,7 @@ unsigned char rdcmp(unsigned char *cells, unsigned char IP)
 unsigned char rdoutf(unsigned char *cells, unsigned char IP)
 {
 	//  OCR1A=(int)cells[(IP+1)]<<filterk;
-	(*filtermod[qqq])((int)cells[IP + 1]);
+	(*filtermod[qqq])((int)cells[SAFE_IDX(IP + 1)]);
 
 	IP += 3;
 	return IP;
@@ -593,7 +599,7 @@ unsigned char rdoutf(unsigned char *cells, unsigned char IP)
 
 unsigned char rdoutp(unsigned char *cells, unsigned char IP)
 {
-	OCR0A = cells[(IP + 2)];
+	OCR0A = cells[SAFE_IDX(IP + 2)];
 	IP += 3;
 	return IP;
 }
@@ -1175,6 +1181,7 @@ int main(void)
 	dir = 1;		  // Direction for the next step
 	btdir = 0;
 	dcdir = 0;
+	omem = 0;
 
 	while (1)
 	{
