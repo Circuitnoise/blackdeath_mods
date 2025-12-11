@@ -942,10 +942,13 @@ void hodge(unsigned char *cellies)
 	k1 = cells[1];
 	k2 = cells[2];
 	g = cells[3];
+	// Ensure all divisors are non-zero to prevent division by zero
 	if (k1 == 0)
 		k1 = 1;
 	if (k2 == 0)
 		k2 = 1;
+	if (q == 0)
+		q = 1;
 
 	// Calculate sum of 3 neighbor cells values
 	sum = cells[CoreCellx] + cells[CoreCellx - 1] + cells[CoreCellx + 1] + cells[CoreCellx - CELLLEN] + cells[CoreCellx + CELLLEN] + cells[CoreCellx - CELLLEN - 1] + cells[CoreCellx - CELLLEN + 1] + cells[CoreCellx + CELLLEN - 1] + cells[CoreCellx + CELLLEN + 1];
@@ -986,17 +989,24 @@ void hodge(unsigned char *cellies)
 
 	// Sets the Values of Cells[0-127]
 	if (cells[CoreCellx] == 0)
+	{
 		// there is a slight chance cell value will raise up to 2
 		// sets the lowest integral number -maximal value is 2 = 1(numinf/k1) + 1 (numill/k2)
-		newcells[CoreCellx % 128] = floor(numinf / k1) + floor(numill / k2);
+		// Safe divisions: k1 and k2 are guaranteed non-zero
+		newcells[CoreCellx % (MAX_SAM / 2)] = floor(numinf / k1) + floor(numill / k2);
+	}
 	else if (cells[CoreCellx] < q - 1) // if cells[CoreCellx]<cells[0]+1
-
-		newcells[CoreCellx % 128] = floor(sum / (numinf + 1)) + g;
+	{
+		// Safe division: (numinf + 1) is always >= 1
+		newcells[CoreCellx % (MAX_SAM / 2)] = floor(sum / (numinf + 1)) + g;
+	}
 	else
-		newcells[CoreCellx % 128] = 0;
+	{
+		newcells[CoreCellx % (MAX_SAM / 2)] = 0;
+	}
 
-	if (newcells[CoreCellx % 128] > q - 1)
-		newcells[CoreCellx % 128] = q - 1;
+	if (newcells[CoreCellx % (MAX_SAM / 2)] > q - 1)
+		newcells[CoreCellx % (MAX_SAM / 2)] = q - 1;
 
 	CoreCellx++; // next time take the next cell
 
