@@ -114,7 +114,7 @@ unsigned char adcread(unsigned char channel)
 										 /*#endif
 									 
 										 #ifdef DEBUG
-										  return rand()%255;
+										  return (rand()%254)+1; // ensure non-zero fallback
 										 #endif
 										 */
 }
@@ -176,25 +176,25 @@ unsigned char outpp(unsigned char *cells, unsigned char IP)
 
 unsigned char finc(unsigned char *cells, unsigned char IP)
 {
-	omem++;
+	omem = SAFE_IDX(omem + 1); // safe wrapping
 	return IP + insdir;
 }
 
 unsigned char fdec(unsigned char *cells, unsigned char IP)
 {
-	omem--;
+	omem = SAFE_IDX(omem - 1); // safe wrapping
 	return IP + insdir;
 }
 
 unsigned char fincm(unsigned char *cells, unsigned char IP)
 {
-	cells[omem]++;
+	cells[SAFE_IDX(omem)]++; // safe index
 	return IP + insdir;
 }
 
 unsigned char fdecm(unsigned char *cells, unsigned char IP)
 {
-	cells[omem]--;
+	cells[SAFE_IDX(omem)]--; // safe index
 	return IP + insdir;
 }
 
@@ -269,21 +269,33 @@ unsigned char bitshift3(unsigned char *cells, unsigned char IP)
 
 unsigned char branch(unsigned char *cells, unsigned char IP)
 {
-	if (cells[IP + 1] == 0)
+	if (cells[SAFE_IDX(IP + 1)] == 0) // safe index
 		IP = cells[omem];
 	return IP + insdir;
 }
-for (y = 0; y < maxy; y++)
+
+unsigned char jump(unsigned char *cells, unsigned char IP)
 {
-	x = adcread(3);					  // Read output signal
-	cells[SAFE_IDX(x)] ^= (x & 0x0f); // safe index
-}
-}
+	if (cells[SAFE_IDX(IP + 1)] < 128)				   // safe index
+		return SAFE_IDX(IP + cells[SAFE_IDX(IP + 1)]); // safe wrapping
+	else
+		return IP + insdir;
 }
 
+unsigned char infect(unsigned char *cells, unsigned char IP)
+{
+	int x = IP - 1;
+	if (x < 0)
+		x = MAX_SAM;
+	if (cells[x] < 128)
+		cells[SAFE_IDX(IP + 1)] = cells[IP]; // safe index
+	return IP + insdir;
+}
 unsigned char store(unsigned char *cells, unsigned char IP)
 {
-	cells[IP] = cells[cells[IP + 1]];
+	// Safe indirect addressing: wrap both indices
+	unsigned char idx_indirect = SAFE_IDX(cells[SAFE_IDX(IP + 1)]);
+	cells[IP] = cells[idx_indirect];
 	return IP + insdir;
 }
 
@@ -340,7 +352,7 @@ unsigned char ploutp(unsigned char *cells, unsigned char IP)
 unsigned char plenclose(unsigned char *cells, unsigned char IP)
 {
 	cells[IP] = 255;
-	cells[IP + 1] = 255;
+	cells[SAFE_IDX(IP + 1)] = 255; // safe index
 	return IP + 2;
 }
 
@@ -370,8 +382,8 @@ unsigned char plwalk(unsigned char *cells, unsigned char IP)
 	else if (dir > 1 && (cells[IP] % 0x03) == 0)
 		dir = -1;
 	else
-		// changing pace
-		insdir = (int)dir * cells[IP] >> 4;
+		// changing pace - correct operator precedence
+		insdir = ((int)dir * cells[IP]) >> 4; // safe precedence
 
 	return IP + insdir;
 }
@@ -394,13 +406,13 @@ unsigned char bfdec(unsigned char *cells, unsigned char IP)
 
 unsigned char bfincm(unsigned char *cells, unsigned char IP)
 {
-	cells[omem]++;
+	cells[SAFE_IDX(omem)]++; // safe index
 	return ++IP;
 }
 
 unsigned char bfdecm(unsigned char *cells, unsigned char IP)
 {
-	cells[omem]--;
+	cells[SAFE_IDX(omem)]--; // safe index
 	return ++IP;
 }
 
@@ -438,8 +450,8 @@ unsigned char bfbrac2(unsigned char *cells, unsigned char IP)
 	if (cells[omem] != 0)
 		i = ostack[cycle] - 1;
 	cycle--;
-	if (cycle < -1)
-		cycle = 20;
+	if (cycle < 0)
+		cycle = 19;
 	return i;
 }
 
@@ -449,20 +461,20 @@ unsigned char bfbrac2(unsigned char *cells, unsigned char IP)
 unsigned char SIRoutf(unsigned char *cells, unsigned char IP)
 {
 	//  OCR1A=((int)cells[(IP+1)]+(int)cells[IP-1])<<filterk;
-	(*filtermod[qqq])((int)cells[(IP + 1)] + (int)cells[IP - 1]);
+	(*filtermod[qqq])((int)cells[SAFE_IDX(IP + 1)] + (int)cells[SAFE_IDX(IP - 1)]); // safe indices
 
 	return IP + insdir;
 }
 
 unsigned char SIRoutp(unsigned char *cells, unsigned char IP)
 {
-	OCR0A = cells[(IP + 1)] + cells[IP - 1]; // neg?
+	OCR0A = cells[SAFE_IDX(IP + 1)] + cells[SAFE_IDX(IP - 1)]; // safe indices
 	return IP + insdir;
 }
 
 unsigned char SIRincif(unsigned char *cells, unsigned char IP)
 {
-	if ((cells[(IP + 1)] > 0 && cells[(IP + 1)] < 128))
+	if ((cells[SAFE_IDX(IP + 1)] > 0 && cells[SAFE_IDX(IP + 1)] < 128)) // safe indices
 		cells[IP]++;
 	return IP + insdir;
 }
@@ -470,7 +482,7 @@ unsigned char SIRincif(unsigned char *cells, unsigned char IP)
 unsigned char SIRdieif(unsigned char *cells, unsigned char IP)
 {
 
-	if ((cells[(IP + 1)] > 0 && cells[(IP + 1)] < 128))
+	if ((cells[SAFE_IDX(IP + 1)] > 0 && cells[SAFE_IDX(IP + 1)] < 128)) // safe indices
 	{
 		if (rand() % 10 < 4)
 			cells[IP] = dead;
@@ -480,7 +492,7 @@ unsigned char SIRdieif(unsigned char *cells, unsigned char IP)
 
 unsigned char SIRrecif(unsigned char *cells, unsigned char IP)
 {
-	if (cells[(IP + 1)] >= 128)
+	if (cells[SAFE_IDX(IP + 1)] >= 128) // safe index
 		cells[IP] = recovered;
 	return IP + insdir;
 }
@@ -488,11 +500,11 @@ unsigned char SIRrecif(unsigned char *cells, unsigned char IP)
 unsigned char SIRinfif(unsigned char *cells, unsigned char IP)
 {
 
-	if (cells[(IP + 1)] == 0)
+	if (cells[SAFE_IDX(IP - 1)] == 0)
 	{
 
-		if ((cells[IP - 1] > 0 && cells[IP - 1] < 128) ||
-			(cells[(IP + 1)] > 0 && cells[(IP + 1)] < 128))
+		if ((cells[SAFE_IDX(IP - 1)] > 0 && cells[SAFE_IDX(IP - 1)] < 128) ||
+			(cells[SAFE_IDX(IP + 1)] > 0 && cells[SAFE_IDX(IP + 1)] < 128)) // safe indices
 		{
 			if (rand() % 10 < 4)
 				cells[IP] = 1;
@@ -528,14 +540,14 @@ unsigned char rdsub(unsigned char *cells, unsigned char IP)
 
 unsigned char rdjmp(unsigned char *cells, unsigned char IP)
 {
-	IP = IP + cells[IP + 1];
+	IP = SAFE_IDX(IP + cells[SAFE_IDX(IP + 1)]); // safe wrapping
 	return IP;
 }
 
 unsigned char rdjmz(unsigned char *cells, unsigned char IP)
 {
 	if (cells[SAFE_IDX(IP + cells[IP + 2])] == 0)
-		IP = cells[IP + 1];
+		IP = SAFE_IDX(cells[SAFE_IDX(IP + 1)]); // safe index wrapping
 	else
 		IP += 3;
 	return IP;
@@ -544,7 +556,7 @@ unsigned char rdjmz(unsigned char *cells, unsigned char IP)
 unsigned char rdjmg(unsigned char *cells, unsigned char IP)
 {
 	if (cells[SAFE_IDX(IP + cells[IP + 2])] >= 0)
-		IP = cells[IP + 1];
+		IP = SAFE_IDX(cells[SAFE_IDX(IP + 1)]); // safe index wrapping
 	else
 		IP += 3;
 	return IP;
@@ -556,7 +568,7 @@ unsigned char rddjz(unsigned char *cells, unsigned char IP)
 	x = SAFE_IDX(IP + cells[IP + 2]);
 	cells[x] = cells[x] - 1;
 	if (cells[x] == 0)
-		IP = cells[IP + 1];
+		IP = SAFE_IDX(cells[SAFE_IDX(IP + 1)]); // safe index wrapping
 	else
 		IP += 3;
 	return IP;
@@ -739,7 +751,7 @@ unsigned char btclear(unsigned char *cells, unsigned char IP)
 
 unsigned char btdup(unsigned char *cells, unsigned char IP)
 {
-	if (cells[omem] == 0 || cells[omem - 1] != 0)
+	if (cells[omem] == 0 || cells[SAFE_IDX(omem - 1)] != 0) // safe index
 	{
 		if (btdir == 0)
 			btdir = 1;
@@ -751,7 +763,7 @@ unsigned char btdup(unsigned char *cells, unsigned char IP)
 			btdir = 2;
 	}
 	else
-		cells[omem - 1] = cells[omem];
+		cells[SAFE_IDX(omem - 1)] = cells[omem]; // safe index
 	return IP;
 }
 
@@ -764,7 +776,7 @@ unsigned char redplague(unsigned char *cells, unsigned char IP)
 	if (clock == 12)
 	{
 		clock = 12;
-		cells[IP + 1] = cells[IP];
+		cells[SAFE_IDX(IP + 1)] = cells[IP]; // safe index
 		if (IP == 255)
 			clock = 13;
 		return IP + 1;
@@ -779,8 +791,11 @@ unsigned char reddeath(unsigned char *cells, unsigned char IP)
 	if (clock == 13)
 	{
 		clock = 13;
-		cells[IP + count] = adcread(3); // get output signal
-		count++;
+		if (count < ARRAY_SIZE) // prevent unbounded iteration
+		{
+			cells[SAFE_IDX(IP + count)] = adcread(3); // get output signal (safe index)
+			count++;
+		}
 		return IP; // just keeps on going
 	}
 	else
@@ -848,8 +863,8 @@ unsigned char redrooms(unsigned char *cells, unsigned char IP)
 
 unsigned char redunmask(unsigned char *cells, unsigned char IP)
 {
-	cells[IP - 1] ^= 255;
-	cells[IP + 1] ^= 255;
+	cells[SAFE_IDX(IP - 1)] ^= 255; // safe index
+	cells[SAFE_IDX(IP + 1)] ^= 255; // safe index
 	return IP + insdir;
 }
 // 6- the prince (omem) - the output! walking through 7 rooms
@@ -879,7 +894,7 @@ unsigned char redoutside(unsigned char *cells, unsigned char IP)
 {
 
 	// input sample to cell (which one neighbour to omem)
-	cells[omem + 1] = adcread(3); // get output signal
+	cells[SAFE_IDX(omem + 1)] = adcread(3); // get output signal (safe index)
 
 	// output to filter
 	(*filtermod[qqq])((int)cells[omem]);
@@ -891,22 +906,25 @@ unsigned char redoutside(unsigned char *cells, unsigned char IP)
 
 /*
 	Plaque Mutate changes cell values to values from Filter Output until cells[0] value is reached
-	cells[SAFE_IDX(omem + 1)] = adcread(3); // get output signal (safe index)
+*/
 void mutate(unsigned char *cells)
 {
 	unsigned char x, y;
-	for (y = 0; y < cells[0]; y++)
+	unsigned int maxy = cells[0];
+	if (maxy > (ARRAY_SIZE - 1))
+		maxy = (ARRAY_SIZE - 1); // cap iterations to array size -1
+	for (y = 0; y < maxy; y++)
 	{
-		x = adcread(3);			// Read output signal
-		cells[x] ^= (x & 0x0f); // copies the bit if it is set in one operand (but not both) 0b00001111
+		x = adcread(3);					  // Read output signal
+		cells[SAFE_IDX(x)] ^= (x & 0x0f); // safe index
 	}
 }
 /*
 	Plague Hodge Implementation
 	Switches every 110 Cycles the cells array with newcells array
 
-		x = adcread(3);            // Read output signal
-		cells[SAFE_IDX(x)] ^= (x & 0x0f); // safe index
+*/
+
 void hodge(unsigned char *cellies)
 {
 	int sum = 0, numill = 0, numinf = 0; // max value 32767
@@ -941,16 +959,16 @@ void hodge(unsigned char *cellies)
 		q = 1;
 
 	// Calculate sum of 3 neighbor cells values
-	sum = cells[CoreCellx] + cells[CoreCellx - 1] + cells[CoreCellx + 1] + cells[CoreCellx - CELLLEN] + cells[CoreCellx + CELLLEN] + cells[CoreCellx - CELLLEN - 1] + cells[CoreCellx - CELLLEN + 1] + cells[CoreCellx + CELLLEN - 1] + cells[CoreCellx + CELLLEN + 1];
+	sum = cells[SAFE_IDX(CoreCellx)] + cells[SAFE_IDX(CoreCellx - 1)] + cells[SAFE_IDX(CoreCellx + 1)] + cells[SAFE_IDX(CoreCellx - CELLLEN)] + cells[SAFE_IDX(CoreCellx + CELLLEN)] + cells[SAFE_IDX(CoreCellx - CELLLEN - 1)] + cells[SAFE_IDX(CoreCellx - CELLLEN + 1)] + cells[SAFE_IDX(CoreCellx + CELLLEN - 1)] + cells[SAFE_IDX(CoreCellx + CELLLEN + 1)]; // safe indices
 
 	// Decide which one is infected or ill.
-	if (cells[CoreCellx - 1] == (q - 1))
+	if (cells[SAFE_IDX(CoreCellx - 1)] == (q - 1))
 		numill++;
-	else if (cells[CoreCellx - 1] > 0)
+	else if (cells[SAFE_IDX(CoreCellx - 1)] > 0)
 		numinf++;
-	if (cells[CoreCellx + 1] == (q - 1))
+	if (cells[SAFE_IDX(CoreCellx + 1)] == (q - 1))
 		numill++;
-	else if (cells[CoreCellx + 1] > 0)
+	else if (cells[SAFE_IDX(CoreCellx + 1)] > 0)
 		numinf++;
 	if (cells[CoreCellx - CELLLEN] == (q - 1))
 		numill++;
@@ -983,20 +1001,20 @@ void hodge(unsigned char *cellies)
 		// there is a slight chance cell value will raise up to 2
 		// sets the lowest integral number -maximal value is 2 = 1(numinf/k1) + 1 (numill/k2)
 		// Safe divisions: k1 and k2 are guaranteed non-zero
-		newcells[CoreCellx % (MAX_SAM / 2)] = floor(numinf / k1) + floor(numill / k2);
+		newcells[SAFE_IDX(CoreCellx % (MAX_SAM / 2))] = floor(numinf / k1) + floor(numill / k2); // safe index
 	}
 	else if (cells[CoreCellx] < q - 1) // if cells[CoreCellx]<cells[0]+1
 	{
 		// Safe division: (numinf + 1) is always >= 1
-		newcells[CoreCellx % (MAX_SAM / 2)] = floor(sum / (numinf + 1)) + g;
+		newcells[SAFE_IDX(CoreCellx % (MAX_SAM / 2))] = floor(sum / (numinf + 1)) + g; // safe index
 	}
 	else
 	{
-		newcells[CoreCellx % (MAX_SAM / 2)] = 0;
+		newcells[SAFE_IDX(CoreCellx % (MAX_SAM / 2))] = 0; // safe index
 	}
 
-	if (newcells[CoreCellx % (MAX_SAM / 2)] > q - 1)
-		newcells[CoreCellx % (MAX_SAM / 2)] = q - 1;
+	if (newcells[SAFE_IDX(CoreCellx % (MAX_SAM / 2))] > q - 1)
+		newcells[SAFE_IDX(CoreCellx % (MAX_SAM / 2))] = q - 1; // safe index
 
 	CoreCellx++; // next time take the next cell
 
@@ -1073,23 +1091,23 @@ void SIR(unsigned char *cellies)
 	for (x = CELLLEN; x < ((MAX_SAM / 2) - CELLLEN); x++)
 	{
 		cell = cells[x];
-		newcells[x] = cell;
+		newcells[SAFE_IDX(x)] = cell; // safe index
 		if (cell >= kk)
-			newcells[x] = recovered;
+			newcells[SAFE_IDX(x)] = recovered; // safe index
 		else if ((cell > 0 && cell < kk))
 		{
-			newcells[x]++;
+			newcells[SAFE_IDX(x)]++; // safe index
 		}
 		else if (cell == susceptible)
 		{
 
-			if ((cells[x - CELLLEN] > 0 && cells[x - CELLLEN] < kk) ||
-				(cells[x + CELLLEN] > 0 && cells[x + CELLLEN] < kk) ||
-				(cells[x - 1] > 0 && cells[x - 1] < kk) ||
-				(cells[x + 1] > 0 && cells[x + 1] < kk))
+			if ((cells[SAFE_IDX(x - CELLLEN)] > 0 && cells[SAFE_IDX(x - CELLLEN)] < kk) || // safe indices
+				(cells[SAFE_IDX(x + CELLLEN)] > 0 && cells[SAFE_IDX(x + CELLLEN)] < kk) ||
+				(cells[SAFE_IDX(x - 1)] > 0 && cells[SAFE_IDX(x - 1)] < kk) ||
+				(cells[SAFE_IDX(x + 1)] > 0 && cells[SAFE_IDX(x + 1)] < kk))
 			{
 				if (rand() % 10 < p)
-					newcells[x] = 1;
+					newcells[SAFE_IDX(x)] = 1; // safe index
 			}
 		}
 	}
@@ -1118,12 +1136,12 @@ void life(unsigned char *cellies)
 
 	for (x = CELLLEN + 1; x < ((MAX_SAM / 2) - CELLLEN - 1); x++)
 	{
-		sum = cells[x] % 2 + cells[x - 1] % 2 + cells[x + 1] % 2 + cells[x - CELLLEN] % 2 + cells[x + CELLLEN] % 2 + cells[x - CELLLEN - 1] % 2 + cells[x - CELLLEN + 1] % 2 + cells[x + CELLLEN - 1] % 2 + cells[x + CELLLEN + 1] % 2;
-		sum = sum - cells[x] % 2;
-		if (sum == 3 || (sum + (cells[x] % 2) == 3))
-			newcells[x] = 255;
+		sum = cells[SAFE_IDX(x)] % 2 + cells[SAFE_IDX(x - 1)] % 2 + cells[SAFE_IDX(x + 1)] % 2 + cells[SAFE_IDX(x - CELLLEN)] % 2 + cells[SAFE_IDX(x + CELLLEN)] % 2 + cells[SAFE_IDX(x - CELLLEN - 1)] % 2 + cells[SAFE_IDX(x - CELLLEN + 1)] % 2 + cells[SAFE_IDX(x + CELLLEN - 1)] % 2 + cells[SAFE_IDX(x + CELLLEN + 1)] % 2; // safe indices
+		sum = sum - cells[SAFE_IDX(x)] % 2;
+		if (sum == 3 || (sum + (cells[SAFE_IDX(x)] % 2) == 3))
+			newcells[SAFE_IDX(x)] = 255;
 		else
-			newcells[x] = 0;
+			newcells[SAFE_IDX(x)] = 0;
 	}
 
 	// swapping
@@ -1213,14 +1231,14 @@ int main(void)
 			{
 			case 0:
 				//
-				instruction = cells[instructionp];
+				instruction = cells[SAFE_IDX(instructionp)];
 				instructionp = (*instructionsetfirst[instruction % 26])(cells, instructionp); // mistake before as was instruction%INSTLEN in last instance
 				//      insdir=dir*(IP%16)+1; // prev mistake as just got exponentially larger
 				insdir = dir; // set direction for next instruction
 				break;
 			case 1:
 				// Plague Alogrithms
-				instruction = cells[instructionp];
+				instruction = cells[SAFE_IDX(instructionp)];
 				instructionp = (*instructionsetplague[instruction % 8])(cells, instructionp);
 				//	    insdir=dir*(IP%16)+1;
 				insdir = dir;
@@ -1231,41 +1249,41 @@ int main(void)
 				break;
 			case 2:
 				// Brain Fuck Algorithms
-				instruction = cells[instructionp];
+				instruction = cells[SAFE_IDX(instructionp)];
 				instructionp = (*instructionsetbf[instruction % 9])(cells, instructionp);
 				//	    insdir=dir*(IP%16)+1;
 				insdir = dir;
 				break;
 			case 3:
 				// SIR (susceptible, infected, recovered) Algorithms
-				instruction = cells[instructionp];
+				instruction = cells[SAFE_IDX(instructionp)];
 				instructionp = (*instructionsetSIR[instruction % 6])(cells, instructionp);
 				//	    insdir=dir*(IP%16)+1;
 				insdir = dir;
 				break;
 			case 4:
 				// Red Code Algorithms
-				instruction = cells[instructionp];
+				instruction = cells[SAFE_IDX(instructionp)];
 				instructionp = (*instructionsetredcode[instruction % 11])(cells, instructionp);
 				//	    insdir=dir*(IP%16)+1;
 				insdir = dir;
 				break;
 			case 5:
 				// direct output
-				instruction = cells[instructionp];
+				instruction = cells[SAFE_IDX(instructionp)];
 				OCR0A = instruction;
 				instructionp += dir; // changed from insdir
 				break;
 			case 6:
 				// Red Death Algorithms
-				instruction = cells[instructionp];
+				instruction = cells[SAFE_IDX(instructionp)];
 				instructionp = (*instructionsetreddeath[instruction % 7])(cells, instructionp);
 				//	    insdir=dir*(IP%16)+1;
 				insdir = dir;
 				break;
 			case 7:
 				// la biota Algorithms
-				instruction = cells[instructionp];
+				instruction = cells[SAFE_IDX(instructionp)];
 				instructionp = (*instructionsetbiota[instruction % 10])(cells, instructionp);
 				if (btdir == 0)
 					instructionp += 1;
@@ -1327,6 +1345,12 @@ int main(void)
 			// Toggle Routing to Filter and Feedback
 			PORTD ^= (1 << PORTD0) | (1 << PORTD1) | (1 << PORTD2);
 			// PORTD^=instructionp&0x07;
+			break;
+		default:
+			// Undefined hardk value - reset to safe state
+			hardk = 0;
+			cbi(PORTD, PORTD2); // no feedback
+			break;
 		}
 
 		// Filter Configuration
@@ -1408,6 +1432,9 @@ int main(void)
 			sbi(DDRB, PORTB1);					 // Filter on
 			TCCR1B = (1 << WGM12) | (1 << CS12); // 256
 			filterk = 4;
+		default:
+			cbi(DDRB, PORTB1); // filter off
+			break;
 		}
 	}
 	return 0;
