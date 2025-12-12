@@ -4,7 +4,6 @@
 # Ignore build artifacts
 *.o
 *.out
-*.hex
 
 # Ignore temporary or intermediate files
 *.tmp
