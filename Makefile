@@ -22,11 +22,14 @@ FUSEL = 0xf7
 all: microbdinterp.hex
 #-------------------
 help: 
-	@echo "Usage: make all|flash|read_firmware|rdfuses|fuse|clean"
+	@echo "Usage: make all|alt|flash|flash_alt|read_firmware|rdfuses|fuse|clean"
 	@echo ""
 	@echo "Targets:"
-	@echo "  all           - Build hexfile from source"
-	@echo "  flash         - Flash hexfile to ATmega168"
+	@echo "  all           - Build hexfile from source (default)"
+	@echo "  alt           - Build alternative hexfile from microbdinterp_alt1.c"
+	@echo "  flash         - Flash main hexfile (microbdinterp.hex) to ATmega168"
+	@echo "  flash_alt     - Flash alternative hexfile (microbdinterp_alt.hex) to ATmega168"
+	@echo "  flash_original- Flash original firmware (backup_original.hex) to ATmega168
 	@echo "  read_firmware - Download firmware from ATmega168 to backup.hex"
 	@echo "  rdfuses       - Read fuse bytes from ATmega168"
 	@echo "  fuse          - Write default fuse bytes"
@@ -34,6 +37,17 @@ help:
 #-------------------
 microbdinterp.hex : microbdinterp.out 
 	$(OBJCOPY) -R .eeprom -O ihex microbdinterp.out microbdinterp.hex 
+# Alternative build using microbdinterp_alt1.c
+microbdinterp_alt.hex : microbdinterp_alt.out
+	$(OBJCOPY) -R .eeprom -O ihex microbdinterp_alt.out microbdinterp_alt.hex
+
+alt: microbdinterp_alt.hex
+
+microbdinterp_alt.out : microbdinterp_alt.o
+	$(CC) ${LDFLAGS} $(CFLAGS) -o microbdinterp_alt.out microbdinterp_alt.o
+
+microbdinterp_alt.o : microbdinterp_alt1.c
+	$(CC) $(CFLAGS) -Os -c microbdinterp_alt1.c -o microbdinterp_alt.o
 #microbdinterp.out : microbdinterp.o 
 #	$(CC) $(CFLAGS) -o microbdinterp.out -Wl,-Map,microbdinterp.map microbdinterp.o 
 microbdinterp.out : microbdinterp.o 
@@ -54,6 +68,12 @@ fuse:
 
 flash: all
 	$(AVRDUDE) -F -U flash:w:microbdinterp.hex:i
+
+flash_alt: alt
+	$(AVRDUDE) -F -U flash:w:microbdinterp_alt.hex:i
+
+flash_original:
+	$(AVRDUDE) -F -U flash:w:backup_original.hex:i
 
 read_firmware:
 	@echo "Reading firmware from ATmega168..."
